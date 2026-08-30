@@ -1088,7 +1088,7 @@ export default function EgoApp() {
         </Link>
       </p>
       <main className="w-full max-w-xl flex flex-col items-center gap-7 -mt-[8vh]">
-        <h1 className="font-sans text-[56px] sm:text-[90px] font-normal tracking-[-1px] leading-none select-none">
+        <h1 className="font-sans text-[56px] sm:text-[90px] font-medium tracking-[6px] leading-none select-none">
           <span className="text-g-red">E</span>
           <span className="text-g-blue">G</span>
           <span className="text-g-yellow">O</span>
