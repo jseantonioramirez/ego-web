@@ -197,3 +197,5 @@ Cuando llegue el momento: React Native + Expo puede consumir
 `/api/audit` tal cual (es una API REST normal) y reutilizar
 `types/ego.ts` sin cambios. La lógica de negocio no hay que rehacerla —
 solo la capa visual nativa.
+
+<!-- deploy trigger 2026-08-30T13:06:09Z -->
