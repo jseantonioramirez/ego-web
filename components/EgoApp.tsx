@@ -61,7 +61,7 @@ const UI_STRINGS: Record<UiLang, Record<string, string>> = {
     homePlaceholder: "¿Qué te ocurre?",
     homeListening: "Te escucho…",
     homeInputLabel: "¿Qué te ocurre?",
-    homeFooterPrivacy: "Un espacio privado y objetivo antes de que actúes.",
+    homeFooterPrivacy: "Un espacio para pensar con claridad antes de actuar.",
     homeFooterAnon:
       "Nadie sabe que fuiste tú: lo que escribes se guarda de forma anónima y nos ayuda a mejorar EGO.",
     micStart: "Hablar en vez de escribir",
@@ -94,7 +94,7 @@ const UI_STRINGS: Record<UiLang, Record<string, string>> = {
     homePlaceholder: "What's going on?",
     homeListening: "Listening…",
     homeInputLabel: "What's going on?",
-    homeFooterPrivacy: "A private, objective space before you act.",
+    homeFooterPrivacy: "A space to think clearly before you act.",
     homeFooterAnon:
       "No one knows it was you: what you write is stored anonymously and helps us improve EGO.",
     micStart: "Speak instead of typing",
