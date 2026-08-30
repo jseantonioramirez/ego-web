@@ -1073,7 +1073,7 @@ export default function EgoApp() {
           EN
         </button>
       </div>
-      <p className="absolute bottom-2 inset-x-0 text-center text-[#c7cacd] text-[9px]">
+      <p className="absolute bottom-2 inset-x-0 text-center text-[#c7cacd] text-[7px] whitespace-nowrap tracking-tight">
         <Link href="/privacidad" className="hover:text-[#9aa0a6] hover:underline">
           Privacidad
         </Link>
