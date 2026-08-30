@@ -1073,6 +1073,15 @@ export default function EgoApp() {
           EN
         </button>
       </div>
+      <p className="absolute bottom-3 inset-x-0 text-center text-[#c7cacd] text-[10px]">
+        <Link href="/privacidad" className="hover:text-[#9aa0a6] hover:underline">
+          Privacidad
+        </Link>
+        {" · "}
+        <Link href="/terminos" className="hover:text-[#9aa0a6] hover:underline">
+          Términos
+        </Link>
+      </p>
       <main className="w-full max-w-xl flex flex-col items-center gap-7 -mt-[8vh]">
         <h1 className="font-sans text-[56px] sm:text-[90px] font-normal tracking-[-1px] leading-none select-none">
           <span className="text-g-red">E</span>
@@ -1201,15 +1210,6 @@ export default function EgoApp() {
           </p>
           <p className="text-[#9aa0a6] text-[11px] text-center max-w-[300px]">
             {tHome.homeFooterAnon}
-          </p>
-          <p className="text-[#9aa0a6] text-[11px] text-center">
-            <Link href="/privacidad" className="hover:underline">
-              Privacidad
-            </Link>
-            {" · "}
-            <Link href="/terminos" className="hover:underline">
-              Términos
-            </Link>
           </p>
         </div>
       </main>
