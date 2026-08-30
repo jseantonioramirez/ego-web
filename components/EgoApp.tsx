@@ -258,6 +258,7 @@ export default function EgoApp() {
   const loadingInterval3Ref = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
 
   const stopLoadingTimer = useCallback(() => {
     if (loadingIntervalRef.current) {
@@ -277,6 +278,36 @@ export default function EgoApp() {
     if (loadingInterval3Ref.current) {
       clearInterval(loadingInterval3Ref.current);
       loadingInterval3Ref.current = null;
+    }
+  }, []);
+
+  // La voz de ElevenLabs sale con poco volumen incluso al máximo del
+  // dispositivo (el archivo mp3 en sí trae poca ganancia). El elemento
+  // <audio> ya reproduce a su volumen máximo (1.0), así que ahí no hay
+  // más margen — el refuerzo real solo se consigue enrutando el audio
+  // por la Web Audio API con una ganancia superior a 1.0. Un único
+  // AudioContext se reutiliza entre reproducciones (los navegadores
+  // limitan cuántos se pueden crear).
+  const AUDIO_GAIN_BOOST = 1.8;
+
+  const boostAudioGain = useCallback((audio: HTMLAudioElement) => {
+    try {
+      if (typeof window === "undefined" || !window.AudioContext) return;
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioContext();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") {
+        void ctx.resume();
+      }
+      const source = ctx.createMediaElementSource(audio);
+      const gain = ctx.createGain();
+      gain.gain.value = AUDIO_GAIN_BOOST;
+      source.connect(gain).connect(ctx.destination);
+    } catch {
+      // Si el navegador bloquea Web Audio, o ya conectó este elemento
+      // antes, el audio sigue sonando por la vía normal del <audio>,
+      // simplemente sin el refuerzo de volumen.
     }
   }, []);
 
@@ -586,6 +617,7 @@ export default function EgoApp() {
           audioUrlRef.current = url;
           const audio = new Audio(url);
           finishPlayback(audio);
+          boostAudioGain(audio);
 
           const reader = res.body.getReader();
           let sourceOpened = false;
@@ -631,6 +663,7 @@ export default function EgoApp() {
         audioUrlRef.current = url;
         const audio = new Audio(url);
         finishPlayback(audio);
+        boostAudioGain(audio);
         await audio.play();
         setSpeakStatus("playing");
       } catch (err) {
@@ -638,7 +671,7 @@ export default function EgoApp() {
         setSpeakError(err instanceof Error ? err.message : "No se pudo generar el audio.");
       }
     },
-    [speakStatus, speakSource, stopAudio, voiceGender]
+    [speakStatus, speakSource, stopAudio, voiceGender, boostAudioGain]
   );
 
   const showMicError = useCallback((message: string) => {
