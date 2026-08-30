@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkRateLimit, getClientIp, RATE_LIMITS } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -50,6 +51,15 @@ export async function POST(req: NextRequest) {
   }
   if (text.length > MAX_TEXT_LENGTH) {
     return NextResponse.json({ error: "El texto es demasiado largo para generar audio." }, { status: 400 });
+  }
+
+  const ip = getClientIp(req);
+  const rl = await checkRateLimit(ip, "speak", RATE_LIMITS.speak.limit, RATE_LIMITS.speak.windowMinutes);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Has pedido demasiado audio en poco tiempo. Espera unos minutos y vuelve a intentarlo." },
+      { status: 429, headers: rl.retryAfterSeconds ? { "Retry-After": String(rl.retryAfterSeconds) } : undefined }
+    );
   }
 
   let config: { apiKey: string; voiceId: string };

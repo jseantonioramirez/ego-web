@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getEgoSystemPrompt } from "@/lib/system-prompt";
 import { EGO_SEGUNDA_LECTURA_TOOL } from "@/lib/ego-schema";
+import { checkRateLimit, getClientIp, RATE_LIMITS } from "@/lib/rate-limit";
 import type { EgoSegundaLectura } from "@/types/ego";
 
 export const runtime = "nodejs";
@@ -45,6 +46,20 @@ export async function POST(req: NextRequest) {
   }
   if (input.length > MAX_INPUT_LENGTH || respuesta.length > MAX_RESPUESTA_LENGTH) {
     return NextResponse.json({ error: "El texto es demasiado largo." }, { status: 400 });
+  }
+
+  const ip = getClientIp(req);
+  const rl = await checkRateLimit(
+    ip,
+    "segunda-lectura",
+    RATE_LIMITS.segundaLectura.limit,
+    RATE_LIMITS.segundaLectura.windowMinutes
+  );
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Has hecho demasiadas peticiones en poco tiempo. Espera unos minutos y vuelve a intentarlo." },
+      { status: 429, headers: rl.retryAfterSeconds ? { "Retry-After": String(rl.retryAfterSeconds) } : undefined }
+    );
   }
 
   const model = process.env.ANTHROPIC_MODEL;

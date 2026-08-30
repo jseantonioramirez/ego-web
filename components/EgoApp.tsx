@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { EgoDiagnosis, EgoSegundaLectura, EgoTerceraLectura } from "@/types/ego";
 
 type ViewState = "hook" | "verdict";
@@ -1202,6 +1203,15 @@ export default function EgoApp() {
           </p>
           <p className="text-[#9aa0a6] text-[11px] text-center max-w-[300px]">
             {tHome.homeFooterAnon}
+          </p>
+          <p className="text-[#9aa0a6] text-[11px] text-center">
+            <Link href="/privacidad" className="hover:underline">
+              Privacidad
+            </Link>
+            {" · "}
+            <Link href="/terminos" className="hover:underline">
+              Términos
+            </Link>
           </p>
         </div>
       </main>

@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getEgoSystemPrompt } from "@/lib/system-prompt";
 import { EGO_DIAGNOSIS_TOOL } from "@/lib/ego-schema";
 import { saveAnonymizedCase } from "@/lib/db";
+import { checkRateLimit, getClientIp, RATE_LIMITS } from "@/lib/rate-limit";
 import type { EgoDiagnosis } from "@/types/ego";
 
 export const runtime = "nodejs";
@@ -37,6 +38,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: `El texto es demasiado largo (máximo ${MAX_INPUT_LENGTH} caracteres).` },
       { status: 400 }
+    );
+  }
+
+  const ip = getClientIp(req);
+  const rl = await checkRateLimit(ip, "audit", RATE_LIMITS.audit.limit, RATE_LIMITS.audit.windowMinutes);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Has hecho demasiadas auditorías en poco tiempo. Espera unos minutos y vuelve a intentarlo." },
+      { status: 429, headers: rl.retryAfterSeconds ? { "Retry-After": String(rl.retryAfterSeconds) } : undefined }
     );
   }
 
