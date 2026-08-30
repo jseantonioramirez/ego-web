@@ -1204,8 +1204,8 @@ export default function EgoApp() {
           </button>
         </form>
 
-        <div className="flex flex-col items-center gap-1">
-          <p className="text-[#5f6368] text-[10px] text-center whitespace-nowrap tracking-tight">
+        <div className="flex flex-col items-center gap-1.5">
+          <p className="text-[#5f6368] text-[13px] text-center max-w-[380px]">
             {tHome.homeFooterPrivacy}
           </p>
           <p className="text-[#9aa0a6] text-[9px] text-center whitespace-nowrap tracking-tight">
