@@ -662,13 +662,18 @@ export default function EgoApp() {
     setMicError(null);
     const recognition = new SpeechRecognitionCtor();
     recognition.lang = homeLang === "en" ? "en-US" : "es-ES";
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
     recognition.onresult = (event) => {
+      // En modo continuo, cada pausa cierra un resultado "final" y abre
+      // uno nuevo — hay que recorrer TODOS los resultados desde el
+      // principio (no solo desde event.resultIndex) o el texto de las
+      // frases anteriores se pierde cada vez que la persona retoma tras
+      // una pausa.
       let transcript = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript;
       }
       setInputValue(transcript.slice(0, 1000));
