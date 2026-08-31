@@ -805,12 +805,7 @@ export default function EgoApp() {
                     <SpeakButton
                       active={speakStatus === "playing" && speakSource === "diagnosis"}
                       loading={speakStatus === "loading" && speakSource === "diagnosis"}
-                      onClick={() =>
-                        toggleSpeak(
-                          `${diagnosis.diagnostico_titulo}. ${diagnosis.cuerpo_diagnostico}`,
-                          "diagnosis"
-                        )
-                      }
+                      onClick={() => toggleSpeak(diagnosis.cuerpo_diagnostico, "diagnosis")}
                       labelStart={t.speakStart}
                       labelStop={t.speakStop}
                       labelLoading={t.speakLoading}
@@ -852,9 +847,6 @@ export default function EgoApp() {
                       F
                     </button>
                   </div>
-                  <h2 className="text-[clamp(24px,6vw,32px)] font-semibold leading-tight text-balance pt-1">
-                    {diagnosis.diagnostico_titulo}
-                  </h2>
                 </div>
                 <p className="text-[16px] leading-[1.75] text-[#1b1c1e] max-w-[64ch] mt-3.5">
                   {diagnosis.cuerpo_diagnostico}
