@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getEgoSystemPrompt } from "@/lib/system-prompt";
 import { EGO_DIAGNOSIS_TOOL } from "@/lib/ego-schema";
-import { saveAnonymizedCase } from "@/lib/db";
+import { saveAnonymizedCase, isEmailSubscribed, insertMemberCase, getMemberCaseHistory } from "@/lib/db";
 import { checkRateLimit, getClientIp, RATE_LIMITS } from "@/lib/rate-limit";
-import type { EgoDiagnosis } from "@/types/ego";
+import type { EgoDiagnosis, EgoAuditResponse } from "@/types/ego";
 
 export const runtime = "nodejs";
 
@@ -29,6 +29,8 @@ export async function POST(req: NextRequest) {
   }
 
   const input = (body as { input?: unknown } | null)?.input;
+  const emailRaw = (body as { email?: unknown } | null)?.email;
+  const email = typeof emailRaw === "string" && emailRaw.trim() ? emailRaw.trim() : null;
 
   if (typeof input !== "string" || !input.trim()) {
     return NextResponse.json({ error: "Escribe qué te ocurre antes de auditar." }, { status: 400 });
@@ -62,6 +64,25 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // Miembro identificado: se verifica en el servidor, nunca se confía en
+    // el email tal cual llega del cliente (ver lib/db.ts, member_cases).
+    const isMember = email ? await isEmailSubscribed(email) : false;
+
+    let userMessage = input.trim();
+    if (isMember && email) {
+      try {
+        const history = await getMemberCaseHistory(email);
+        if (history.length > 0) {
+          const historyBlock = history
+            .map((h) => `- ${h.createdAt.slice(0, 10)}: ${h.sesgoIdentificado} — "${h.inputExcerpt}"`)
+            .join("\n");
+          userMessage = `[Historial de este usuario — para tu razonamiento interno, ver sección 11 del system prompt]\n${historyBlock}\n\nDeclaración actual del usuario: "${userMessage}"`;
+        }
+      } catch (histErr) {
+        console.error("[EGO /api/audit] no se pudo leer el historial del miembro", histErr);
+      }
+    }
+
     const anthropic = client();
 
     const message = await anthropic.messages.create({
@@ -70,7 +91,7 @@ export async function POST(req: NextRequest) {
       system: getEgoSystemPrompt(),
       tools: [EGO_DIAGNOSIS_TOOL],
       tool_choice: { type: "tool", name: "emitir_diagnostico" },
-      messages: [{ role: "user", content: input.trim() }],
+      messages: [{ role: "user", content: userMessage }],
     });
 
     const toolUse = message.content.find(
@@ -109,7 +130,27 @@ export async function POST(req: NextRequest) {
       console.error("[EGO /api/audit] no se pudo guardar el caso anónimo", dbErr);
     }
 
-    return NextResponse.json(diagnosis);
+    // Historial identificado del miembro — aparte del anónimo de arriba,
+    // nunca lo sustituye. Igual que arriba, un fallo aquí no debe tumbar
+    // la respuesta, y los casos de crisis nunca se guardan aquí.
+    let caseId: string | undefined;
+    if (isMember && email && !diagnosis.nota_seguridad) {
+      try {
+        caseId = await insertMemberCase({
+          email,
+          lang: "es",
+          input: input.trim(),
+          sesgoIdentificado: diagnosis.sesgo_identificado,
+          cuerpoDiagnostico: diagnosis.cuerpo_diagnostico,
+          preguntaEspejo: diagnosis.pregunta_espejo,
+        });
+      } catch (dbErr) {
+        console.error("[EGO /api/audit] no se pudo guardar el caso del miembro", dbErr);
+      }
+    }
+
+    const response: EgoAuditResponse = caseId ? { ...diagnosis, case_id: caseId } : diagnosis;
+    return NextResponse.json(response);
   } catch (err) {
     console.error("[EGO /api/audit]", err);
     return NextResponse.json(

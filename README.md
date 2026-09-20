@@ -23,7 +23,9 @@ monocromático, conectada de verdad a Claude a través del system prompt de
   real llega después de forma asíncrona mientras la Pantalla 2 ya muestra
   "PROCESANDO CASO".
 - **`lib/db.ts`** — guarda cada diagnóstico de forma anónima en Postgres
-  (ver "Base de datos de casos anónimos" más abajo).
+  (ver "Base de datos de casos anónimos" más abajo), y por separado, el
+  historial identificado de los miembros de pago (ver "Historial de
+  miembros" más abajo).
 
 ## Base de datos de casos anónimos
 
@@ -54,6 +56,35 @@ cambio — no lo quites sin quitar también el guardado.
 Para desplegar esto hace falta vincular una base de datos Postgres al
 proyecto de Vercel: Storage → Create Database → Postgres. Vercel inyecta
 `POSTGRES_URL` solo; no hay que tocar código.
+
+## Historial de miembros — para que no arranquen de cero cada vez
+
+Decisión de negocio (con el propietario del producto): quien se registra
+y paga se merece que EGO recuerde sus patrones, no que cada consulta
+empiece de cero. La tabla `member_cases` (separada de `cases`, nunca se
+mezclan) guarda el diagnóstico, y si llegan a ocurrir, la segunda y
+tercera lectura, identificados por email — solo para suscriptores con
+`status = 'active'` (`isEmailSubscribed`, verificado en el servidor en
+cada llamada, nunca se confía en el email que manda el cliente).
+
+- En `/api/audit`, si el email verificado tiene casos anteriores, se le
+  pasa a Claude un resumen compacto (fecha, sesgo, fragmento de la
+  frase) antes de la declaración actual — ver sección 11 del system
+  prompt para las reglas de cómo (y cuándo no) debe usarlo.
+- El caso se encadena entre las tres vueltas por `case_id`, que
+  `/api/audit` devuelve y el frontend reenvía en segunda y tercera
+  lectura. Si un usuario se hace miembro a mitad de sesión (por ejemplo,
+  verificó su email justo al llegar al paywall de la tercera lectura), no
+  hay `case_id` todavía — la función de esa vuelta crea el caso completo
+  de cero en vez de perder lo ya ocurrido.
+- **Los casos de crisis nunca se guardan aquí**, igual que en la base
+  anónima. Si la salvaguarda (Regla 6) se activa en la segunda o tercera
+  lectura sobre un caso que ya se había guardado, la fila se borra por
+  completo — no se conserva ni parcialmente.
+- Esto es aparte del guardado anónimo de `cases`, no lo sustituye: el
+  mismo diagnóstico de un miembro puede quedar en las dos tablas, una sin
+  identificar (para el I+D general del producto) y otra identificada
+  (para que ese miembro concreto tenga continuidad).
 
 ## Cobro (Stripe) — construido, solo falta la cuenta real
 

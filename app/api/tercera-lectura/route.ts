@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getEgoSystemPrompt } from "@/lib/system-prompt";
 import { EGO_TERCERA_LECTURA_TOOL } from "@/lib/ego-schema";
 import { checkRateLimit, getClientIp, RATE_LIMITS } from "@/lib/rate-limit";
+import { isEmailSubscribed, saveMemberCaseTerceraLectura, deleteMemberCase } from "@/lib/db";
 import type { EgoTerceraLectura } from "@/types/ego";
 
 export const runtime = "nodejs";
@@ -38,6 +39,10 @@ export async function POST(req: NextRequest) {
   const segundaLectura = typeof b?.segunda_lectura === "string" ? b.segunda_lectura.trim() : "";
   const preguntaFinal = typeof b?.pregunta_final === "string" ? b.pregunta_final.trim() : "";
   const respuesta2 = typeof b?.respuesta2 === "string" ? b.respuesta2.trim() : "";
+  const emailRaw = b?.email;
+  const email = typeof emailRaw === "string" && emailRaw.trim() ? emailRaw.trim() : null;
+  const caseIdRaw = b?.case_id;
+  const caseId = typeof caseIdRaw === "string" && caseIdRaw.trim() ? caseIdRaw.trim() : null;
 
   // Este endpoint solo tiene sentido como cierre definitivo de una
   // auditoría que ya pasó por diagnóstico y segunda lectura: sin ese
@@ -127,6 +132,38 @@ export async function POST(req: NextRequest) {
           ? raw.nota_seguridad.trim()
           : null,
     };
+
+    // Historial identificado del miembro — mismo criterio que en las dos
+    // vueltas anteriores: nunca tumba la respuesta al usuario, y un caso
+    // que activa la salvaguarda de seguridad aquí se borra por completo
+    // en vez de guardarse con el cierre.
+    if (email) {
+      try {
+        const isMember = await isEmailSubscribed(email);
+        if (isMember) {
+          if (terceraLectura.nota_seguridad) {
+            if (caseId) await deleteMemberCase(caseId, email);
+          } else {
+            await saveMemberCaseTerceraLectura({
+              caseId,
+              email,
+              lang: "es",
+              input,
+              sesgoIdentificado: sesgo,
+              cuerpoDiagnostico: cuerpo,
+              preguntaEspejo,
+              respuesta,
+              segundaLectura,
+              preguntaFinal,
+              respuesta2,
+              terceraLectura: terceraLectura.tercera_lectura,
+            });
+          }
+        }
+      } catch (dbErr) {
+        console.error("[EGO /api/tercera-lectura] no se pudo guardar el caso del miembro", dbErr);
+      }
+    }
 
     return NextResponse.json(terceraLectura);
   } catch (err) {

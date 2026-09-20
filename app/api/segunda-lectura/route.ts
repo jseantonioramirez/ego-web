@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getEgoSystemPrompt } from "@/lib/system-prompt";
 import { EGO_SEGUNDA_LECTURA_TOOL } from "@/lib/ego-schema";
 import { checkRateLimit, getClientIp, RATE_LIMITS } from "@/lib/rate-limit";
+import { isEmailSubscribed, saveMemberCaseSegundaLectura, deleteMemberCase } from "@/lib/db";
 import type { EgoSegundaLectura } from "@/types/ego";
 
 export const runtime = "nodejs";
@@ -35,6 +36,10 @@ export async function POST(req: NextRequest) {
   const cuerpo = typeof b?.cuerpo_diagnostico === "string" ? b.cuerpo_diagnostico.trim() : "";
   const preguntaEspejo = typeof b?.pregunta_espejo === "string" ? b.pregunta_espejo.trim() : "";
   const respuesta = typeof b?.respuesta === "string" ? b.respuesta.trim() : "";
+  const emailRaw = b?.email;
+  const email = typeof emailRaw === "string" && emailRaw.trim() ? emailRaw.trim() : null;
+  const caseIdRaw = b?.case_id;
+  const caseId = typeof caseIdRaw === "string" && caseIdRaw.trim() ? caseIdRaw.trim() : null;
 
   // Este endpoint solo tiene sentido como cierre de un diagnóstico ya
   // emitido: sin ese contexto no hay nada que confrontar.
@@ -117,6 +122,36 @@ export async function POST(req: NextRequest) {
           : null,
       pregunta_final: typeof raw.pregunta_final === "string" ? raw.pregunta_final.trim() : "",
     };
+
+    // Historial identificado del miembro — igual que en /api/audit, nunca
+    // debe poder tumbar la respuesta al usuario. Si la salvaguarda se
+    // activó aquí y ya había un caso guardado de la vuelta anterior, se
+    // borra por completo en vez de actualizarlo.
+    if (email) {
+      try {
+        const isMember = await isEmailSubscribed(email);
+        if (isMember) {
+          if (segundaLectura.nota_seguridad) {
+            if (caseId) await deleteMemberCase(caseId, email);
+          } else {
+            await saveMemberCaseSegundaLectura({
+              caseId,
+              email,
+              lang: "es",
+              input,
+              sesgoIdentificado: sesgo,
+              cuerpoDiagnostico: cuerpo,
+              preguntaEspejo,
+              respuesta,
+              segundaLectura: segundaLectura.segunda_lectura,
+              preguntaFinal: segundaLectura.pregunta_final,
+            });
+          }
+        }
+      } catch (dbErr) {
+        console.error("[EGO /api/segunda-lectura] no se pudo guardar el caso del miembro", dbErr);
+      }
+    }
 
     return NextResponse.json(segundaLectura);
   } catch (err) {

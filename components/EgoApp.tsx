@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { EgoDiagnosis, EgoSegundaLectura, EgoTerceraLectura } from "@/types/ego";
+import type { EgoDiagnosis, EgoAuditResponse, EgoSegundaLectura, EgoTerceraLectura } from "@/types/ego";
 
 type ViewState = "hook" | "verdict";
 type VerdictStatus = "loading" | "success" | "error";
@@ -290,6 +290,11 @@ export default function EgoApp() {
   const [inputValue, setInputValue] = useState("");
   const [caseMeta, setCaseMeta] = useState<CaseMeta | null>(null);
   const [diagnosis, setDiagnosis] = useState<EgoDiagnosis | null>(null);
+  // Id del caso en member_cases, solo cuando /api/audit lo devolvió (el
+  // usuario ya era miembro identificado al hacer la consulta) — se
+  // reenvía en segunda y tercera lectura para que el historial quede
+  // encadenado al mismo caso en vez de crear uno nuevo por vuelta.
+  const [caseId, setCaseId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
   const [micSupported, setMicSupported] = useState(false);
@@ -590,6 +595,7 @@ export default function EgoApp() {
     setTerceraLecturaStatus("idle");
     setTerceraLecturaError(null);
     setSpeakError(null);
+    setCaseId(null);
     stopAudio();
     stopLoadingTimer3();
     stopLoadingTimer2();
@@ -601,13 +607,17 @@ export default function EgoApp() {
       const res = await fetch("/api/audit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: value }),
+        body: JSON.stringify({
+          input: value,
+          ...(memberStatus === "active" && memberEmail ? { email: memberEmail } : {}),
+        }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as EgoAuditResponse & { error?: string };
       if (!res.ok) {
         throw new Error(data?.error || "No se pudo generar el diagnóstico.");
       }
       setDiagnosis(data as EgoDiagnosis);
+      setCaseId(data.case_id ?? null);
       setStatus("success");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "No se pudo generar el diagnóstico.");
@@ -615,7 +625,7 @@ export default function EgoApp() {
     } finally {
       stopLoadingTimer();
     }
-  }, [stopLoadingTimer, stopLoadingTimer2, stopLoadingTimer3, stopAudio]);
+  }, [stopLoadingTimer, stopLoadingTimer2, stopLoadingTimer3, stopAudio, memberStatus, memberEmail]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -648,6 +658,7 @@ export default function EgoApp() {
     setView("hook");
     setInputValue("");
     setDiagnosis(null);
+    setCaseId(null);
     setCaseMeta(null);
     setErrorMessage(null);
     setRespuestaEspejo("");
@@ -697,6 +708,8 @@ export default function EgoApp() {
             cuerpo_diagnostico: diagnosis.cuerpo_diagnostico,
             pregunta_espejo: diagnosis.pregunta_espejo,
             respuesta,
+            ...(memberStatus === "active" && memberEmail ? { email: memberEmail } : {}),
+            ...(caseId ? { case_id: caseId } : {}),
           }),
         });
         const data = (await res.json()) as EgoSegundaLectura & { error?: string };
@@ -719,7 +732,7 @@ export default function EgoApp() {
         stopLoadingTimer2();
       }
     },
-    [respuestaEspejo, caseMeta, diagnosis, stopLoadingTimer2]
+    [respuestaEspejo, caseMeta, diagnosis, stopLoadingTimer2, memberStatus, memberEmail, caseId]
   );
 
   // La tercera lectura es la única parte de pago (ver Paywall más abajo):
@@ -752,6 +765,11 @@ export default function EgoApp() {
           segunda_lectura: segundaLectura,
           pregunta_final: preguntaFinal,
           respuesta2,
+          // memberStatus ya es "active" en cuanto esta función corre de
+          // verdad (ver handleTerceraLecturaSubmit y el efecto de arriba),
+          // así que memberEmail siempre debería estar disponible aquí.
+          ...(memberEmail ? { email: memberEmail } : {}),
+          ...(caseId ? { case_id: caseId } : {}),
         }),
       });
       const data = (await res.json()) as EgoTerceraLectura & { error?: string };
@@ -772,7 +790,7 @@ export default function EgoApp() {
     } finally {
       stopLoadingTimer3();
     }
-  }, [respuestaEspejo2, respuestaEspejo, caseMeta, diagnosis, segundaLectura, preguntaFinal, stopLoadingTimer3]);
+  }, [respuestaEspejo2, respuestaEspejo, caseMeta, diagnosis, segundaLectura, preguntaFinal, stopLoadingTimer3, memberEmail, caseId]);
 
   // En cuanto la membresía se confirma mientras el paywall está abierto
   // (por la pestaña de checkout, o por "ya soy miembro" más abajo), la
