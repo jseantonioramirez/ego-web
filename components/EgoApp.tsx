@@ -78,6 +78,25 @@ const UI_STRINGS: Record<UiLang, Record<string, string>> = {
     terceraLecturaLabel: "Tercera lectura",
     voiceMale: "Voz masculina",
     voiceFemale: "Voz femenina",
+    paywallTitle: "El cierre definitivo es para miembros",
+    paywallBody:
+      "El diagnóstico y la segunda lectura son gratis. La tercera lectura — el cierre definitivo de la auditoría — es para miembros de EGO.",
+    paywallMonthly: "Mensual",
+    paywallMonthlyPrice: "3 $ / mes",
+    paywallAnnual: "Anual",
+    paywallAnnualPrice: "12 $ / año",
+    paywallAnnualNote: "equivale a 1 $/mes",
+    paywallSubscribe: "Suscribirme",
+    paywallOpeningTab: "Abriendo el pago…",
+    paywallNewTabNote: "Se abre en una pestaña nueva para no perder este caso — vuelve aquí cuando termines.",
+    paywallAlreadyMember: "¿Ya eres miembro?",
+    paywallEmailPlaceholder: "tu@email.com",
+    paywallVerify: "Verificar",
+    paywallVerifying: "Comprobando…",
+    paywallVerifyError: "No encontramos una suscripción activa con ese email.",
+    paywallCheckoutError: "No se pudo iniciar el pago. Inténtalo de nuevo.",
+    postCheckoutSuccess: "Pago confirmado — ya eres miembro de EGO.",
+    postCheckoutCancelled: "Pago cancelado — puedes intentarlo de nuevo cuando quieras.",
   },
   en: {
     caseLabel: "CASE",
@@ -110,6 +129,25 @@ const UI_STRINGS: Record<UiLang, Record<string, string>> = {
     terceraLecturaLabel: "Third reading",
     voiceMale: "Male voice",
     voiceFemale: "Female voice",
+    paywallTitle: "The final word is for members",
+    paywallBody:
+      "The diagnosis and the second reading are free. The third reading — the audit's definitive close — is for EGO members.",
+    paywallMonthly: "Monthly",
+    paywallMonthlyPrice: "$3 / month",
+    paywallAnnual: "Annual",
+    paywallAnnualPrice: "$12 / year",
+    paywallAnnualNote: "works out to $1/month",
+    paywallSubscribe: "Subscribe",
+    paywallOpeningTab: "Opening checkout…",
+    paywallNewTabNote: "Opens in a new tab so this case isn't lost — come back here when you're done.",
+    paywallAlreadyMember: "Already a member?",
+    paywallEmailPlaceholder: "you@email.com",
+    paywallVerify: "Verify",
+    paywallVerifying: "Checking…",
+    paywallVerifyError: "We couldn't find an active subscription with that email.",
+    paywallCheckoutError: "Couldn't start checkout. Please try again.",
+    postCheckoutSuccess: "Payment confirmed — you're now an EGO member.",
+    postCheckoutCancelled: "Payment cancelled — you can try again anytime.",
   },
 };
 
@@ -156,6 +194,32 @@ function getStoredVoiceGender(): VoiceGender {
     return v === "f" ? "f" : "m";
   } catch {
     return "m";
+  }
+}
+
+/**
+ * Email de la persona ya suscrita (paywall de la tercera lectura, ver
+ * más abajo). Se guarda tras un checkout confirmado o tras verificar
+ * "ya soy miembro" — así no hace falta volver a pasar por Stripe en cada
+ * visita ni en cada dispositivo donde ya haya iniciado sesión antes.
+ */
+const MEMBER_EMAIL_STORAGE_KEY = "ego-member-email";
+
+function getStoredMemberEmail(): string | null {
+  try {
+    const v = window.localStorage.getItem(MEMBER_EMAIL_STORAGE_KEY);
+    return v && v.trim() ? v.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function setStoredMemberEmail(email: string) {
+  try {
+    window.localStorage.setItem(MEMBER_EMAIL_STORAGE_KEY, email);
+  } catch {
+    // Si falla (modo privado, cuota), la sesión sigue funcionando —
+    // solo tendrá que volver a verificar la próxima vez.
   }
 }
 
@@ -250,6 +314,23 @@ export default function EgoApp() {
   const [terceraLecturaError, setTerceraLecturaError] = useState<string | null>(null);
   const [elapsedSeconds3, setElapsedSeconds3] = useState(0);
   const [voiceGender, setVoiceGenderState] = useState<VoiceGender>("m");
+  // Paywall de la tercera lectura — ver Regla de negocio decidida con el
+  // propietario: diagnóstico + segunda lectura son gratis, la tercera
+  // lectura (el cierre definitivo) requiere membresía.
+  const [memberEmail, setMemberEmail] = useState<string | null>(null);
+  const [memberStatus, setMemberStatus] = useState<"unknown" | "checking" | "active" | "none">(
+    "unknown"
+  );
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState<"monthly" | "annual" | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [memberEmailInput, setMemberEmailInput] = useState("");
+  const [verifyMemberStatus, setVerifyMemberStatus] = useState<"idle" | "checking" | "error">(
+    "idle"
+  );
+  const [postCheckoutNotice, setPostCheckoutNotice] = useState<"success" | "cancelled" | null>(
+    null
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const micErrorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -340,6 +421,133 @@ export default function EgoApp() {
       stopLoadingTimer3();
     };
   }, [stopLoadingTimer, stopLoadingTimer2, stopLoadingTimer3, stopAudio]);
+
+  const verifyMemberEmail = useCallback(async (email: string): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/subscription-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await res.json()) as { active?: boolean };
+      return Boolean(res.ok && data.active);
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // Arranque de la membresía: 1) si ya había un email guardado de una
+  // visita anterior, lo revalida contra el servidor (puede haber
+  // cancelado desde entonces); 2) si venimos de un checkout de Stripe
+  // recién completado (`?suscripcion=exito&session_id=...`), lo confirma
+  // directamente contra la sesión de Stripe — más rápido y sin depender
+  // de que el webhook ya haya escrito en la base de datos.
+  useEffect(() => {
+    const stored = getStoredMemberEmail();
+    if (stored) {
+      setMemberEmail(stored);
+      setMemberStatus("checking");
+      void verifyMemberEmail(stored).then((active) => {
+        setMemberStatus(active ? "active" : "none");
+      });
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const suscripcion = params.get("suscripcion");
+    if (suscripcion === "exito") {
+      const sessionId = params.get("session_id");
+      window.history.replaceState({}, "", window.location.pathname);
+      if (sessionId) {
+        setMemberStatus("checking");
+        fetch(`/api/checkout/confirm?session_id=${encodeURIComponent(sessionId)}`)
+          .then((res) => res.json())
+          .then((data: { active?: boolean; email?: string }) => {
+            if (data.active && data.email) {
+              setStoredMemberEmail(data.email);
+              setMemberEmail(data.email);
+              setMemberStatus("active");
+              setPostCheckoutNotice("success");
+            } else {
+              setMemberStatus((s) => (s === "checking" ? "none" : s));
+            }
+          })
+          .catch(() => setMemberStatus((s) => (s === "checking" ? "none" : s)));
+      }
+    } else if (suscripcion === "cancelada") {
+      window.history.replaceState({}, "", window.location.pathname);
+      setPostCheckoutNotice("cancelled");
+    }
+  }, [verifyMemberEmail]);
+
+  // Sincroniza entre pestañas: el checkout se abre en una pestaña nueva
+  // (ver handleSubscribe) para no perder el caso a medias en esta — en
+  // cuanto esa otra pestaña confirma el pago y escribe el email en
+  // localStorage, este efecto lo recoge aquí sin que la persona tenga que
+  // volver a hacer nada.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== MEMBER_EMAIL_STORAGE_KEY || !e.newValue) return;
+      setMemberEmail(e.newValue);
+      setMemberStatus("checking");
+      void verifyMemberEmail(e.newValue).then((active) => {
+        setMemberStatus(active ? "active" : "none");
+      });
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [verifyMemberEmail]);
+
+  const handleSubscribe = useCallback(
+    async (plan: "monthly" | "annual") => {
+      setCheckoutError(null);
+      setCheckoutLoadingPlan(plan);
+      // Se abre la pestaña ANTES del await (no después) porque algunos
+      // navegadores solo permiten window.open sin bloqueo de popups
+      // cuando ocurre de forma síncrona dentro del gesto de clic — luego
+      // se le asigna la URL real en cuanto Stripe la devuelve.
+      const tab = window.open("", "_blank");
+      try {
+        const res = await fetch("/api/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plan, email: memberEmail || undefined }),
+        });
+        const data = (await res.json()) as { url?: string; error?: string };
+        if (!res.ok || !data.url) {
+          throw new Error(data.error || "No se pudo iniciar el pago.");
+        }
+        if (tab) {
+          tab.location.href = data.url;
+        } else {
+          // El navegador bloqueó la pestaña nueva (o no la soporta) —
+          // redirige la actual como último recurso, aunque eso pierda el
+          // caso en curso.
+          window.location.href = data.url;
+        }
+      } catch (err) {
+        tab?.close();
+        setCheckoutError(err instanceof Error ? err.message : "No se pudo iniciar el pago.");
+      } finally {
+        setCheckoutLoadingPlan(null);
+      }
+    },
+    [memberEmail]
+  );
+
+  const handleVerifyMember = useCallback(async () => {
+    const email = memberEmailInput.trim();
+    if (!email) return;
+    setVerifyMemberStatus("checking");
+    const active = await verifyMemberEmail(email);
+    if (active) {
+      setStoredMemberEmail(email);
+      setMemberEmail(email);
+      setMemberStatus("active");
+      setVerifyMemberStatus("idle");
+    } else {
+      setVerifyMemberStatus("error");
+    }
+  }, [memberEmailInput, verifyMemberEmail]);
 
   const setVoiceGender = useCallback((gender: VoiceGender) => {
     setVoiceGenderState(gender);
@@ -454,6 +662,10 @@ export default function EgoApp() {
     setTerceraLecturaStatus("idle");
     setTerceraLecturaError(null);
     setSpeakError(null);
+    setShowPaywall(false);
+    setCheckoutError(null);
+    setMemberEmailInput("");
+    setVerifyMemberStatus("idle");
   }, [stopLoadingTimer, stopLoadingTimer2, stopLoadingTimer3, stopAudio]);
 
   const handleRetry = useCallback(() => {
@@ -510,56 +722,80 @@ export default function EgoApp() {
     [respuestaEspejo, caseMeta, diagnosis, stopLoadingTimer2]
   );
 
-  const handleTerceraLecturaSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      const respuesta2 = respuestaEspejo2.trim();
-      if (!respuesta2 || !caseMeta || !diagnosis || !segundaLectura || !preguntaFinal) return;
+  // La tercera lectura es la única parte de pago (ver Paywall más abajo):
+  // esta función hace la llamada de verdad y no comprueba membresía — la
+  // comprobación vive en handleTerceraLecturaSubmit y en el efecto que
+  // reintenta automáticamente en cuanto se confirma la suscripción.
+  const performTerceraLectura = useCallback(async () => {
+    const respuesta2 = respuestaEspejo2.trim();
+    if (!respuesta2 || !caseMeta || !diagnosis || !segundaLectura || !preguntaFinal) return;
 
-      setTerceraLecturaStatus("loading");
-      setTerceraLecturaError(null);
-      setElapsedSeconds3(0);
+    setTerceraLecturaStatus("loading");
+    setTerceraLecturaError(null);
+    setElapsedSeconds3(0);
+    stopLoadingTimer3();
+    loadingInterval3Ref.current = setInterval(() => {
+      setElapsedSeconds3((s) => s + 1);
+    }, 1000);
+
+    try {
+      const res = await fetch("/api/tercera-lectura", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input: caseMeta.quote,
+          sesgo_identificado: diagnosis.sesgo_identificado,
+          diagnostico_titulo: diagnosis.diagnostico_titulo,
+          cuerpo_diagnostico: diagnosis.cuerpo_diagnostico,
+          pregunta_espejo: diagnosis.pregunta_espejo,
+          respuesta: respuestaEspejo,
+          segunda_lectura: segundaLectura,
+          pregunta_final: preguntaFinal,
+          respuesta2,
+        }),
+      });
+      const data = (await res.json()) as EgoTerceraLectura & { error?: string };
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudo generar la tercera lectura.");
+      }
+      if (data.nota_seguridad) {
+        setTerceraNotaSeguridad(data.nota_seguridad);
+      } else {
+        setTerceraLectura(data.tercera_lectura);
+      }
+      setTerceraLecturaStatus("success");
+    } catch (err) {
+      setTerceraLecturaError(
+        err instanceof Error ? err.message : "No se pudo generar la tercera lectura."
+      );
+      setTerceraLecturaStatus("error");
+    } finally {
       stopLoadingTimer3();
-      loadingInterval3Ref.current = setInterval(() => {
-        setElapsedSeconds3((s) => s + 1);
-      }, 1000);
+    }
+  }, [respuestaEspejo2, respuestaEspejo, caseMeta, diagnosis, segundaLectura, preguntaFinal, stopLoadingTimer3]);
 
-      try {
-        const res = await fetch("/api/tercera-lectura", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            input: caseMeta.quote,
-            sesgo_identificado: diagnosis.sesgo_identificado,
-            diagnostico_titulo: diagnosis.diagnostico_titulo,
-            cuerpo_diagnostico: diagnosis.cuerpo_diagnostico,
-            pregunta_espejo: diagnosis.pregunta_espejo,
-            respuesta: respuestaEspejo,
-            segunda_lectura: segundaLectura,
-            pregunta_final: preguntaFinal,
-            respuesta2,
-          }),
-        });
-        const data = (await res.json()) as EgoTerceraLectura & { error?: string };
-        if (!res.ok) {
-          throw new Error(data?.error || "No se pudo generar la tercera lectura.");
-        }
-        if (data.nota_seguridad) {
-          setTerceraNotaSeguridad(data.nota_seguridad);
-        } else {
-          setTerceraLectura(data.tercera_lectura);
-        }
-        setTerceraLecturaStatus("success");
-      } catch (err) {
-        setTerceraLecturaError(
-          err instanceof Error ? err.message : "No se pudo generar la tercera lectura."
-        );
-        setTerceraLecturaStatus("error");
-      } finally {
-        stopLoadingTimer3();
+  // En cuanto la membresía se confirma mientras el paywall está abierto
+  // (por la pestaña de checkout, o por "ya soy miembro" más abajo), la
+  // tercera lectura pendiente se envía sola — la persona no tiene que
+  // acordarse de volver a pulsar el botón.
+  useEffect(() => {
+    if (memberStatus === "active" && showPaywall) {
+      setShowPaywall(false);
+      void performTerceraLectura();
+    }
+  }, [memberStatus, showPaywall, performTerceraLectura]);
+
+  const handleTerceraLecturaSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!respuestaEspejo2.trim()) return;
+      if (memberStatus === "active") {
+        void performTerceraLectura();
+      } else {
+        setShowPaywall(true);
       }
     },
-    [respuestaEspejo2, respuestaEspejo, caseMeta, diagnosis, segundaLectura, preguntaFinal, stopLoadingTimer3]
+    [respuestaEspejo2, memberStatus, performTerceraLectura]
   );
 
   const toggleSpeak = useCallback(
@@ -996,6 +1232,77 @@ export default function EgoApp() {
                           )}
                         </form>
                       )}
+
+                      {showPaywall && !terceraLectura && !terceraNotaSeguridad && (
+                        <div className="mt-5 max-w-[60ch] border border-[#e8eaed] rounded-2xl p-5 flex flex-col gap-4">
+                          <div>
+                            <p className="text-[15px] font-semibold text-[#1b1c1e]">{t.paywallTitle}</p>
+                            <p className="text-[13.5px] text-[#5f6368] leading-relaxed mt-1">{t.paywallBody}</p>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row gap-3">
+                            <button
+                              type="button"
+                              onClick={() => void handleSubscribe("monthly")}
+                              disabled={checkoutLoadingPlan !== null}
+                              className="flex-1 border border-[#dfe1e5] rounded-xl px-4 py-3 text-left hover:border-[#1a73e8] transition-colors disabled:opacity-60"
+                            >
+                              <span className="block text-[13px] text-[#5f6368]">{t.paywallMonthly}</span>
+                              <span className="block text-[17px] font-semibold text-[#1b1c1e] mt-0.5">
+                                {t.paywallMonthlyPrice}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleSubscribe("annual")}
+                              disabled={checkoutLoadingPlan !== null}
+                              className="flex-1 border-2 border-[#1a73e8] rounded-xl px-4 py-3 text-left relative disabled:opacity-60"
+                            >
+                              <span className="block text-[13px] text-[#1a73e8] font-medium">{t.paywallAnnual}</span>
+                              <span className="block text-[17px] font-semibold text-[#1b1c1e] mt-0.5">
+                                {t.paywallAnnualPrice}
+                              </span>
+                              <span className="block text-[12px] text-[#5f6368] mt-0.5">{t.paywallAnnualNote}</span>
+                            </button>
+                          </div>
+
+                          {checkoutLoadingPlan && (
+                            <span className="ego-shimmer-text text-[13px] font-medium inline-block">
+                              {t.paywallOpeningTab}
+                            </span>
+                          )}
+                          {!checkoutLoadingPlan && (
+                            <p className="text-[12.5px] text-[#9aa0a6]">{t.paywallNewTabNote}</p>
+                          )}
+                          {checkoutError && <p className="text-[#d93025] text-[13px]">{checkoutError}</p>}
+
+                          <div className="border-t border-[#e8eaed] pt-4">
+                            <p className="text-[13px] text-[#5f6368] mb-2">{t.paywallAlreadyMember}</p>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="email"
+                                value={memberEmailInput}
+                                onChange={(e) => setMemberEmailInput(e.target.value)}
+                                placeholder={t.paywallEmailPlaceholder}
+                                autoComplete="email"
+                                disabled={verifyMemberStatus === "checking"}
+                                className="flex-1 min-w-0 border border-[#dfe1e5] rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#1a73e8]"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => void handleVerifyMember()}
+                                disabled={!memberEmailInput.trim() || verifyMemberStatus === "checking"}
+                                className="text-[#1a73e8] text-[13px] font-medium px-3 py-2 disabled:text-[#c7cad1] disabled:cursor-not-allowed hover:underline whitespace-nowrap"
+                              >
+                                {verifyMemberStatus === "checking" ? t.paywallVerifying : t.paywallVerify}
+                              </button>
+                            </div>
+                            {verifyMemberStatus === "error" && (
+                              <p className="text-[#d93025] text-[13px] mt-2">{t.paywallVerifyError}</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -1113,6 +1420,18 @@ export default function EgoApp() {
         </Link>
       </p>
       <main className="w-full max-w-xl flex flex-col items-center gap-7 -mt-[8vh]">
+        {postCheckoutNotice && (
+          <p
+            className={
+              "text-[13px] rounded-full px-4 py-2 " +
+              (postCheckoutNotice === "success"
+                ? "bg-[#e6f4ea] text-[#137333]"
+                : "bg-[#f1f3f4] text-[#5f6368]")
+            }
+          >
+            {postCheckoutNotice === "success" ? tHome.postCheckoutSuccess : tHome.postCheckoutCancelled}
+          </p>
+        )}
         <h1 className="font-sans text-[56px] sm:text-[90px] font-medium tracking-[6px] leading-none select-none">
           <span className="text-g-red">E</span>
           <span className="text-g-blue">G</span>

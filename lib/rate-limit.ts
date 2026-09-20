@@ -116,4 +116,8 @@ export const RATE_LIMITS = {
   segundaLectura: { limit: 15, windowMinutes: 60 },
   terceraLectura: { limit: 15, windowMinutes: 60 },
   speak: { limit: 30, windowMinutes: 60 },
+  // No cuesta tokens de IA, pero sin límite alguien podría usarlo para
+  // adivinar por fuerza bruta si un email concreto es miembro de pago.
+  subscriptionStatus: { limit: 20, windowMinutes: 60 },
+  checkout: { limit: 10, windowMinutes: 60 },
 } as const;

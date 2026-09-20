@@ -16,7 +16,10 @@ let stripeClient: Stripe | null = null;
 
 /** true en cuanto las variables de Stripe existen — úsalo para decidir si mostrar el paywall. */
 export function isStripeConfigured(): boolean {
-  return Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRICE_ID_ANNUAL);
+  return Boolean(
+    process.env.STRIPE_SECRET_KEY &&
+      (process.env.STRIPE_PRICE_ID_ANNUAL || process.env.STRIPE_PRICE_ID_MONTHLY)
+  );
 }
 
 export function getStripe(): Stripe {

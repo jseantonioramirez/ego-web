@@ -55,13 +55,25 @@ Para desplegar esto hace falta vincular una base de datos Postgres al
 proyecto de Vercel: Storage → Create Database → Postgres. Vercel inyecta
 `POSTGRES_URL` solo; no hay que tocar código.
 
-## Cobro (Stripe) — preparado, no activado
+## Cobro (Stripe) — construido, solo falta la cuenta real
 
-El código del cobro ya está escrito y desplegado, pero **inactivo**: sin
-las variables de entorno de Stripe, `/api/checkout` y
-`/api/webhook/stripe` responden que el cobro no está activado y el resto
-de la web (auditorías, base de datos anónima) sigue funcionando exactamente
-igual que hoy. No hace falta tocar nada de esto hasta que decidas activarlo.
+Decisión de negocio (con el propietario del producto): el diagnóstico y la
+segunda lectura son gratis; la tercera lectura (el cierre definitivo de la
+auditoría) es solo para miembros. `EgoApp.tsx` ya tiene el paywall completo
+delante de la tercera lectura — lo único que falta para que cobre de verdad
+es la cuenta real de Stripe y sus variables de entorno. Sin ellas,
+`/api/checkout` y `/api/webhook/stripe` responden que el cobro no está
+activado, y el paywall se lo dice a la persona en vez de fallar en
+silencio; el resto de la web sigue funcionando exactamente igual que hoy.
+
+**Planes:** mensual (marcador de posición: 3 $/mes) y anual (marcador de
+posición: 12 $/año — la propia pantalla lo presenta como "equivale a
+1 $/mes" para que el ahorro frente al mensual se entienda de un vistazo).
+Son precios de ejemplo fáciles de cambiar: los textos están en
+`UI_STRINGS` (`paywallMonthlyPrice` / `paywallAnnualPrice` en
+`components/EgoApp.tsx`) y el precio real que de verdad se cobra lo define
+cada Price en el panel de Stripe (paso 2 más abajo) — ajusta ambos sitios
+a la vez.
 
 **Lo que hay:**
 
@@ -69,9 +81,19 @@ igual que hoy. No hace falta tocar nada de esto hasta que decidas activarlo.
   al arrancar el servidor) para que la ausencia de `STRIPE_SECRET_KEY` no
   rompa el build ni el resto de la app.
 - **`app/api/checkout/route.ts`** — crea una sesión de Stripe Checkout
-  para el plan anual y devuelve su URL. El navegador del cliente se
-  redirige ahí; el email y la tarjeta los pide y los ve Stripe, nunca
-  pasan por nuestro servidor.
+  para el plan que se le pida (`{ plan: "monthly" | "annual" }`) y
+  devuelve su URL. El navegador del cliente se redirige ahí (en una
+  pestaña nueva, para no perder el caso en curso); el email y la tarjeta
+  los pide y los ve Stripe, nunca pasan por nuestro servidor.
+- **`app/api/checkout/confirm/route.ts`** — al volver de Stripe con éxito
+  (`?suscripcion=exito&session_id=...`), confirma el pago leyendo
+  directamente la sesión de Stripe (no la base de datos, para no
+  depender de que el webhook ya haya escrito) y devuelve el email para
+  guardarlo en el navegador.
+- **`app/api/subscription-status/route.ts`** — "¿ya eres miembro?": dado
+  un email, comprueba `isEmailSubscribed` en la base de datos. Lo usa
+  tanto la verificación manual del paywall como la revalidación al
+  arrancar la app si ya había un email guardado de una visita anterior.
 - **`app/api/webhook/stripe/route.ts`** — mantiene la tabla `subscribers`
   al día según lo que pasa de verdad en Stripe: alta (`checkout.session.completed`),
   renovación fallida o baja (`customer.subscription.updated` /
@@ -80,21 +102,25 @@ igual que hoy. No hace falta tocar nada de esto hasta que decidas activarlo.
   estado). Es una tabla aparte de `cases` a propósito: `subscribers` sí
   identifica a la persona (hace falta para cobrarle), `cases` es y sigue
   siendo anónima. No mezclar nunca las dos.
-
-**Lo que NO hay todavía** (a propósito, fuera de esta preparación):
-ningún botón ni pantalla en `EgoApp.tsx` que llame a `/api/checkout`, ni
-el límite de auditorías gratis que activaría ese botón. Es la lógica de
-negocio que falta decidir y construir cuando quieras lanzar el cobro de
-verdad — este commit solo deja la tubería de pago lista.
+- **Paywall en `EgoApp.tsx`** — aparece cuando alguien responde a la
+  pregunta de cierre de la segunda lectura sin ser miembro todavía:
+  ofrece los dos planes, y un campo "¿ya eres miembro?" para verificar un
+  email sin volver a pasar por Stripe (por ejemplo, desde otro
+  dispositivo). El email de la persona se guarda en `localStorage`
+  (`ego-member-email`) y se sincroniza entre pestañas, así que en cuanto
+  la pestaña de pago confirma la suscripción, la pestaña original
+  continúa sola con la tercera lectura pendiente.
 
 **Pasos para activarlo, el día que crees la cuenta de Stripe:**
 
-1. Crea la cuenta en https://dashboard.stripe.com y complete el perfil de
+1. Crea la cuenta en https://dashboard.stripe.com y completa el perfil de
    negocio (esto sí tienes que hacerlo tú — no puedo crear cuentas ni
    introducir tus datos bancarios/fiscales por ti).
-2. Product catalog → crea un producto (p. ej. "EGO — plan anual") con un
-   Price recurrente anual (p. ej. 12€/año). Copia el ID del Price
-   (`price_...`) en `STRIPE_PRICE_ID_ANNUAL`.
+2. Product catalog → crea un producto (p. ej. "EGO — plan mensual") con
+   un Price recurrente mensual, y otro producto/Price para el anual.
+   Copia los IDs (`price_...`) en `STRIPE_PRICE_ID_MONTHLY` y
+   `STRIPE_PRICE_ID_ANNUAL` — puedes activar solo uno de los dos si de
+   momento no quieres ofrecer ambos planes.
 3. Developers → API keys → copia la Secret key (`sk_...`) en
    `STRIPE_SECRET_KEY`.
 4. Developers → Webhooks → Add endpoint, con URL
@@ -102,13 +128,19 @@ verdad — este commit solo deja la tubería de pago lista.
    `checkout.session.completed`, `customer.subscription.updated`,
    `customer.subscription.deleted`. Copia el Signing secret (`whsec_...`)
    en `STRIPE_WEBHOOK_SECRET`.
-5. Añade las tres variables en Vercel (Settings → Environment Variables)
-   y vuelve a desplegar.
+5. Añade las variables en Vercel (Settings → Environment Variables) y
+   vuelve a desplegar.
 6. Prueba con una tarjeta de test de Stripe (`4242 4242 4242 4242`) antes
    de anunciarlo — Stripe tiene modo test y modo live separados por
    completo, con sus propias keys.
+7. Actualiza el precio mostrado en `UI_STRINGS` (paso "Planes" arriba) si
+   los marcadores de posición no coinciden ya con lo que configuraste en
+   Stripe.
 
-Nada de esto es urgente ni bloquea nada de lo que ya funciona hoy.
+Nada de esto bloquea lo que ya funciona hoy: sin las variables, el
+paywall sigue apareciendo (para que puedas ver cómo queda) pero el botón
+de suscribirse muestra el aviso de que el cobro no está activado todavía,
+en vez de romper nada.
 
 ## Puesta en marcha local
 
@@ -197,5 +229,3 @@ Cuando llegue el momento: React Native + Expo puede consumir
 `/api/audit` tal cual (es una API REST normal) y reutilizar
 `types/ego.ts` sin cambios. La lógica de negocio no hay que rehacerla —
 solo la capa visual nativa.
-
-<!-- deploy trigger 2026-08-30T13:06:09Z -->
