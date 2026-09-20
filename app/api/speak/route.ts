@@ -17,6 +17,22 @@ const MAX_TEXT_LENGTH = 2000;
 // más abajo. Sigue soportando español con buena calidad.
 const ELEVENLABS_MODEL_ID = "eleven_flash_v2_5";
 
+// CORS abierto solo en este endpoint — a propósito, para poder probar la
+// voz real desde prototipos de diseño fuera del dominio de la app (p. ej.
+// un artefacto o un archivo local) sin desplegar cada concepto como parte
+// de la web. No expone nada sensible (solo genera audio a partir de
+// texto arbitrario) y ya está limitado por el rate-limit por IP de abajo,
+// así que abrir el origen no cambia la superficie real de abuso.
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 type VoiceGender = "m" | "f";
 
 function elevenLabsConfig(gender: VoiceGender) {
@@ -39,7 +55,7 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Cuerpo de la petición inválido." }, { status: 400 });
+    return NextResponse.json({ error: "Cuerpo de la petición inválido." }, { status: 400, headers: CORS_HEADERS });
   }
 
   const b = body as Record<string, unknown> | null;
@@ -47,10 +63,13 @@ export async function POST(req: NextRequest) {
   const gender: VoiceGender = b?.voice === "f" ? "f" : "m";
 
   if (!text) {
-    return NextResponse.json({ error: "No hay texto para leer." }, { status: 400 });
+    return NextResponse.json({ error: "No hay texto para leer." }, { status: 400, headers: CORS_HEADERS });
   }
   if (text.length > MAX_TEXT_LENGTH) {
-    return NextResponse.json({ error: "El texto es demasiado largo para generar audio." }, { status: 400 });
+    return NextResponse.json(
+      { error: "El texto es demasiado largo para generar audio." },
+      { status: 400, headers: CORS_HEADERS }
+    );
   }
 
   const ip = getClientIp(req);
@@ -58,7 +77,14 @@ export async function POST(req: NextRequest) {
   if (!rl.allowed) {
     return NextResponse.json(
       { error: "Has pedido demasiado audio en poco tiempo. Espera unos minutos y vuelve a intentarlo." },
-      { status: 429, headers: rl.retryAfterSeconds ? { "Retry-After": String(rl.retryAfterSeconds) } : undefined }
+      {
+        status: 429,
+        headers: Object.assign(
+          {},
+          CORS_HEADERS,
+          rl.retryAfterSeconds ? { "Retry-After": String(rl.retryAfterSeconds) } : undefined
+        ),
+      }
     );
   }
 
@@ -69,7 +95,7 @@ export async function POST(req: NextRequest) {
     console.error("[EGO /api/speak]", err);
     return NextResponse.json(
       { error: "La voz de EGO no está configurada todavía." },
-      { status: 500 }
+      { status: 500, headers: CORS_HEADERS }
     );
   }
 
@@ -106,22 +132,25 @@ export async function POST(req: NextRequest) {
       console.error("[EGO /api/speak] error de ElevenLabs", upstream.status, detail);
       return NextResponse.json(
         { error: "No se pudo generar el audio. Inténtalo de nuevo en unos minutos." },
-        { status: 502 }
+        { status: 502, headers: CORS_HEADERS }
       );
     }
 
     return new NextResponse(upstream.body, {
       status: 200,
-      headers: {
-        "Content-Type": "audio/mpeg",
-        "Cache-Control": "no-store",
-      },
+      headers: Object.assign(
+        {
+          "Content-Type": "audio/mpeg",
+          "Cache-Control": "no-store",
+        },
+        CORS_HEADERS
+      ),
     });
   } catch (err) {
     console.error("[EGO /api/speak]", err);
     return NextResponse.json(
       { error: "No se pudo generar el audio. Inténtalo de nuevo en unos minutos." },
-      { status: 500 }
+      { status: 500, headers: CORS_HEADERS }
     );
   }
 }
