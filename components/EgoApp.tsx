@@ -993,7 +993,7 @@ export default function EgoApp() {
           <button
             type="button"
             onClick={handleReset}
-            className="font-sans text-2xl font-normal tracking-[-0.5px] select-none"
+            className="font-display text-2xl font-normal tracking-[-0.5px] select-none"
             aria-label="EGO — volver al inicio"
           >
             <span className="text-g-red">E</span>
@@ -1450,7 +1450,7 @@ export default function EgoApp() {
             {postCheckoutNotice === "success" ? tHome.postCheckoutSuccess : tHome.postCheckoutCancelled}
           </p>
         )}
-        <h1 className="font-sans text-[56px] sm:text-[90px] font-medium tracking-[6px] leading-none select-none">
+        <h1 className="font-display text-[56px] sm:text-[90px] font-medium tracking-[6px] leading-none select-none">
           <span className="text-g-red">E</span>
           <span className="text-g-blue">G</span>
           <span className="text-g-yellow">O</span>

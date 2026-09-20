@@ -5,9 +5,13 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["Poppins", "Arial", "Helvetica Neue", "sans-serif"],
-        display: ['"Bebas Neue"', "Arial Narrow", "sans-serif"],
-        mono: ['"Courier Prime"', "Courier New", "monospace"],
+        // Poppins/Bebas Neue/Courier Prime eran la identidad "clínica" que
+        // ya no encaja con la dirección cálida e inmersiva que estamos
+        // construyendo (ver Sala EGO). Work Sans + Fraunces es el mismo
+        // par tipográfico ya validado ahí.
+        sans: ["Work Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        display: ["Fraunces", "Georgia", "serif"],
+        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
       },
       colors: {
         "g-red": "#EA4335",
