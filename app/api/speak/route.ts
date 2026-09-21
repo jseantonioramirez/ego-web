@@ -11,11 +11,13 @@ export const runtime = "nodejs";
  */
 const MAX_TEXT_LENGTH = 2000;
 
-// eleven_flash_v2_5 prioriza latencia sobre matiz interpretativo frente a
-// eleven_multilingual_v2 (que usábamos antes) — es el cambio con más
-// impacto en "la voz tarda en entrar", junto con optimize_streaming_latency
-// más abajo. Sigue soportando español con buena calidad.
-const ELEVENLABS_MODEL_ID = "eleven_flash_v2_5";
+// Volvemos a eleven_multilingual_v2: eleven_flash_v2_5 ganaba velocidad
+// pero sonaba "a robot" (feedback directo probándolo) — v2 es el modelo
+// "más realista, con expresión emocional rica" de ElevenLabs, a costa de
+// algo más de latencia. Para esta pantalla (voz que se genera una vez por
+// interacción, no una conversación en vivo turno a turno) la naturalidad
+// pesa más que unos cientos de ms de menos.
+const ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 
 // CORS abierto solo en este endpoint — a propósito, para poder probar la
 // voz real desde prototipos de diseño fuera del dominio de la app (p. ej.
@@ -33,14 +35,19 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
-type VoiceGender = "m" | "f";
+type VoiceOption = "m" | "f" | "abuela";
 
-function elevenLabsConfig(gender: VoiceGender) {
+function elevenLabsConfig(voice: VoiceOption) {
   const apiKey = process.env.ELEVENLABS_API_KEY;
-  // La voz femenina es opcional: si su variable no está configurada,
-  // caemos a la masculina en vez de romper el endpoint.
+  // La voz de la abuela y la femenina son opcionales: si su variable no
+  // está configurada, caemos a la masculina en vez de romper el endpoint.
+  // ELEVENLABS_VOICE_ID_ABUELA es el ID del clon de voz real de su
+  // abuela una vez creado en ElevenLabs (Voice Library / Instant Voice
+  // Cloning) — hasta que esa variable exista, "abuela" cae a la voz
+  // femenina normal.
   const voiceId =
-    (gender === "f" ? process.env.ELEVENLABS_VOICE_ID_FEMALE : null) ||
+    (voice === "abuela" ? process.env.ELEVENLABS_VOICE_ID_ABUELA : null) ||
+    (voice !== "m" ? process.env.ELEVENLABS_VOICE_ID_FEMALE : null) ||
     process.env.ELEVENLABS_VOICE_ID;
   if (!apiKey || !voiceId) {
     throw new Error(
@@ -60,7 +67,8 @@ export async function POST(req: NextRequest) {
 
   const b = body as Record<string, unknown> | null;
   const text = typeof b?.text === "string" ? b.text.trim() : "";
-  const gender: VoiceGender = b?.voice === "f" ? "f" : "m";
+  const voice: VoiceOption =
+    b?.voice === "abuela" ? "abuela" : b?.voice === "f" ? "f" : "m";
 
   if (!text) {
     return NextResponse.json({ error: "No hay texto para leer." }, { status: 400, headers: CORS_HEADERS });
@@ -90,7 +98,7 @@ export async function POST(req: NextRequest) {
 
   let config: { apiKey: string; voiceId: string };
   try {
-    config = elevenLabsConfig(gender);
+    config = elevenLabsConfig(voice);
   } catch (err) {
     console.error("[EGO /api/speak]", err);
     return NextResponse.json(
@@ -103,12 +111,11 @@ export async function POST(req: NextRequest) {
     // Usamos el endpoint de streaming: el audio empieza a llegar antes
     // de que ElevenLabs termine de generarlo entero, así que la espera
     // percibida es menor que con el endpoint no-streaming.
-    // optimize_streaming_latency=4 pide a ElevenLabs el máximo recorte de
-    // latencia disponible (a costa de una fracción de calidad/consistencia
-    // de la primera fracción de audio) — combinado con el modelo Flash de
-    // arriba, es la otra mitad del arreglo a "la voz tarda en entrar".
+    // Quitamos optimize_streaming_latency=4 (máximo recorte de latencia a
+    // costa de calidad/consistencia) ahora que priorizamos que la voz no
+    // suene "a robot" sobre ganar unos milisegundos.
     const upstream = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${config.voiceId}/stream?optimize_streaming_latency=4`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${config.voiceId}/stream`,
       {
         method: "POST",
         headers: {
