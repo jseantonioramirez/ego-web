@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import ParticleStage, { type ParticleStageHandle } from "@/components/ParticleStage";
 import type { EgoDiagnosis, EgoAuditResponse, EgoSegundaLectura, EgoTerceraLectura } from "@/types/ego";
 
-type ViewState = "hook" | "verdict";
 type VerdictStatus = "loading" | "success" | "error";
 type SegundaLecturaStatus = "idle" | "loading" | "success" | "error";
 type TerceraLecturaStatus = "idle" | "loading" | "success" | "error";
@@ -55,12 +55,12 @@ const UI_STRINGS: Record<UiLang, Record<string, string>> = {
     accionTactica: "Acción táctica",
     incluyeAccionFisica: "incluye acción física",
     antesDeCerrarEsto: "Antes de cerrar esto",
-    speakStart: "Escuchar diagnóstico",
+    speakStart: "Sentir el pulso",
     speakStop: "Detener lectura",
-    speakLoading: "Generando audio…",
-    homePlaceholder: "Háblame.",
+    speakLoading: "Generando voz…",
+    homePlaceholder: "¿Qué te ocurre?",
     homeListening: "Te escucho…",
-    homeInputLabel: "Háblame.",
+    homeInputLabel: "¿Qué te ocurre?",
     homeFooterPrivacy: "Un espacio para pensar con claridad antes de actuar.",
     homeFooterAnon: "No pedimos tu nombre. Lo que escribes nos ayuda a mejorar EGO.",
     micStart: "Hablar en vez de escribir",
@@ -106,12 +106,12 @@ const UI_STRINGS: Record<UiLang, Record<string, string>> = {
     accionTactica: "Tactical action",
     incluyeAccionFisica: "includes physical action",
     antesDeCerrarEsto: "Before you close this",
-    speakStart: "Listen to diagnosis",
+    speakStart: "Feel the pulse",
     speakStop: "Stop reading",
-    speakLoading: "Generating audio…",
-    homePlaceholder: "Talk to me.",
+    speakLoading: "Generating voice…",
+    homePlaceholder: "What's going on?",
     homeListening: "Listening…",
-    homeInputLabel: "Talk to me.",
+    homeInputLabel: "What's going on?",
     homeFooterPrivacy: "A space to think clearly before you act.",
     homeFooterAnon: "We don't ask your name. What you write helps us improve EGO.",
     micStart: "Speak instead of typing",
@@ -225,13 +225,13 @@ function setStoredMemberEmail(email: string) {
 
 function ActionItem({ text }: { text: string }) {
   return (
-    <li className="flex gap-3 items-start text-[15px] leading-[1.55]">
-      <span className="flex-none w-[22px] h-[22px] mt-0.5 rounded-full bg-[#eef1f6] text-[#5f6368] flex items-center justify-center">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <li>
+      <span className="bullet" aria-hidden="true">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
           <path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </span>
-      <span className="pt-0.5">{text}</span>
+      <span>{text}</span>
     </li>
   );
 }
@@ -241,7 +241,9 @@ function ActionItem({ text }: { text: string }) {
  * y la tercera lectura son textos distintos que se leen por separado
  * (cada uno con su propio botón), no un único audio con todo — de ahí
  * que `active`/`loading` lleguen ya resueltos por el llamador, no se
- * calculen aquí a partir de un estado global compartido.
+ * calculen aquí a partir de un estado global compartido. Visualmente es
+ * el botón "Sentir el pulso" de Sala EGO — una píldora con un punto, no
+ * un icono circular aislado.
  */
 function SpeakButton({
   active,
@@ -250,7 +252,6 @@ function SpeakButton({
   labelStart,
   labelStop,
   labelLoading,
-  size = 34,
 }: {
   active: boolean;
   loading: boolean;
@@ -258,34 +259,23 @@ function SpeakButton({
   labelStart: string;
   labelStop: string;
   labelLoading: string;
-  size?: number;
 }) {
-  const iconSize = size >= 34 ? 17 : 14;
   return (
     <button
       type="button"
+      className="listen"
       onClick={onClick}
       disabled={loading}
-      aria-label={active ? labelStop : loading ? labelLoading : labelStart}
+      data-playing={active ? "true" : "false"}
       aria-pressed={active}
-      style={{ width: size, height: size }}
-      className={
-        "flex-none rounded-full flex items-center justify-center disabled:cursor-wait " +
-        (active || loading
-          ? "bg-[#eef1f6] text-[#4285f4] animate-pulse"
-          : "bg-[#f8f9fb] text-[#1b1c1e] hover:bg-[#eef1f6]")
-      }
     >
-      <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M4 9v6h4l5 4V5L8 9H4Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-        <path d="M17 8.5c1.6 1.8 1.6 5.2 0 7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
+      <span className="dot" aria-hidden="true" />
+      <span>{active ? labelStop : loading ? labelLoading : labelStart}</span>
     </button>
   );
 }
 
 export default function EgoApp() {
-  const [view, setView] = useState<ViewState>("hook");
   const [status, setStatus] = useState<VerdictStatus>("loading");
   const [inputValue, setInputValue] = useState("");
   const [caseMeta, setCaseMeta] = useState<CaseMeta | null>(null);
@@ -336,6 +326,13 @@ export default function EgoApp() {
   const [postCheckoutNotice, setPostCheckoutNotice] = useState<"success" | "cancelled" | null>(
     null
   );
+  // Transición pantalla de inicio ↔ dictamen: ambas secciones están
+  // siempre montadas (como en el concepto de Sala EGO) y se cruzan con
+  // opacidad/transform — no un cambio de vista seco. El desfase de 260ms
+  // / 200ms entre "empieza a salir" y "empieza a entrar" es el mismo del
+  // concepto ya confirmado.
+  const [homeLeaving, setHomeLeaving] = useState(false);
+  const [verdictEntering, setVerdictEntering] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const micErrorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -345,6 +342,9 @@ export default function EgoApp() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const particleStageRef = useRef<ParticleStageHandle>(null);
+  const verdictEnterTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const homeReturnTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopLoadingTimer = useCallback(() => {
     if (loadingIntervalRef.current) {
@@ -373,7 +373,9 @@ export default function EgoApp() {
   // más margen — el refuerzo real solo se consigue enrutando el audio
   // por la Web Audio API con una ganancia superior a 1.0. Un único
   // AudioContext se reutiliza entre reproducciones (los navegadores
-  // limitan cuántos se pueden crear).
+  // limitan cuántos se pueden crear). De paso, el mismo grafo de audio
+  // alimenta un AnalyserNode que mueve el cúmulo de partículas al ritmo
+  // real de la voz (ver ParticleStage) — un único tap, no dos.
   const AUDIO_GAIN_BOOST = 1.8;
 
   const boostAudioGain = useCallback((audio: HTMLAudioElement) => {
@@ -389,11 +391,16 @@ export default function EgoApp() {
       const source = ctx.createMediaElementSource(audio);
       const gain = ctx.createGain();
       gain.gain.value = AUDIO_GAIN_BOOST;
-      source.connect(gain).connect(ctx.destination);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.6;
+      source.connect(gain).connect(analyser).connect(ctx.destination);
+      particleStageRef.current?.attachAnalyser(analyser);
     } catch {
       // Si el navegador bloquea Web Audio, o ya conectó este elemento
       // antes, el audio sigue sonando por la vía normal del <audio>,
-      // simplemente sin el refuerzo de volumen.
+      // simplemente sin el refuerzo de volumen ni el cúmulo reaccionando
+      // a la voz real (se queda con su movimiento ambiental).
     }
   }, []);
 
@@ -407,6 +414,8 @@ export default function EgoApp() {
       URL.revokeObjectURL(audioUrlRef.current);
       audioUrlRef.current = null;
     }
+    particleStageRef.current?.detachAnalyser();
+    particleStageRef.current?.pulse(0.1);
     setSpeakStatus("idle");
     setSpeakSource(null);
   }, []);
@@ -420,6 +429,8 @@ export default function EgoApp() {
     return () => {
       recognitionRef.current?.abort();
       if (micErrorTimeout.current) clearTimeout(micErrorTimeout.current);
+      if (verdictEnterTimeout.current) clearTimeout(verdictEnterTimeout.current);
+      if (homeReturnTimeout.current) clearTimeout(homeReturnTimeout.current);
       stopAudio();
       stopLoadingTimer();
       stopLoadingTimer2();
@@ -619,6 +630,7 @@ export default function EgoApp() {
       setDiagnosis(data as EgoDiagnosis);
       setCaseId(data.case_id ?? null);
       setStatus("success");
+      particleStageRef.current?.pulse(0.45);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "No se pudo generar el diagnóstico.");
       setStatus("error");
@@ -642,9 +654,14 @@ export default function EgoApp() {
         time: now.toLocaleTimeString(lang === "en" ? "en-US" : "es-ES", { hour: "2-digit", minute: "2-digit" }),
         quote: value,
       });
-      // Corte seco: la pantalla cambia en el mismo tick, sin fade ni easing.
-      // El diagnóstico llega después; el frame del dictamen ya está ahí.
-      setView("verdict");
+      // La pantalla de inicio empieza a salir y el dictamen a entrar con
+      // el mismo desfase del concepto de Sala EGO (260ms) — el círculo
+      // recibe un pulso y se recoloca al encuadre del dictamen a la vez.
+      setHomeLeaving(true);
+      particleStageRef.current?.pulse(0.5);
+      particleStageRef.current?.setFocusTarget(1);
+      if (verdictEnterTimeout.current) clearTimeout(verdictEnterTimeout.current);
+      verdictEnterTimeout.current = setTimeout(() => setVerdictEntering(true), 260);
       void runAudit(value);
     },
     [inputValue, runAudit]
@@ -655,7 +672,10 @@ export default function EgoApp() {
     stopLoadingTimer();
     stopLoadingTimer2();
     stopLoadingTimer3();
-    setView("hook");
+    setVerdictEntering(false);
+    particleStageRef.current?.setFocusTarget(0);
+    if (homeReturnTimeout.current) clearTimeout(homeReturnTimeout.current);
+    homeReturnTimeout.current = setTimeout(() => setHomeLeaving(false), 200);
     setInputValue("");
     setDiagnosis(null);
     setCaseId(null);
@@ -723,6 +743,7 @@ export default function EgoApp() {
           setPreguntaFinal(data.pregunta_final);
         }
         setSegundaLecturaStatus("success");
+        particleStageRef.current?.pulse(0.4);
       } catch (err) {
         setSegundaLecturaError(
           err instanceof Error ? err.message : "No se pudo generar la segunda lectura."
@@ -782,6 +803,7 @@ export default function EgoApp() {
         setTerceraLectura(data.tercera_lectura);
       }
       setTerceraLecturaStatus("success");
+      particleStageRef.current?.pulse(0.4);
     } catch (err) {
       setTerceraLecturaError(
         err instanceof Error ? err.message : "No se pudo generar la tercera lectura."
@@ -850,9 +872,12 @@ export default function EgoApp() {
               audioUrlRef.current = null;
             }
             audioRef.current = null;
+            particleStageRef.current?.detachAnalyser();
+            particleStageRef.current?.settleAfterSpeech();
             setSpeakStatus("idle");
           };
           audio.onerror = () => {
+            particleStageRef.current?.detachAnalyser();
             setSpeakStatus("error");
             setSpeakError("No se pudo reproducir el audio.");
           };
@@ -985,601 +1010,1095 @@ export default function EgoApp() {
     recognition.start();
   }, [listening, showMicError, homeLang]);
 
-  if (view === "verdict" && caseMeta) {
-    const t = UI_STRINGS[detectUiLang(caseMeta.quote)];
-    return (
-      <div className="min-h-screen w-full flex flex-col bg-white text-[#1b1c1e] font-sans">
-        <header className="flex items-center px-6 sm:px-10 py-5">
-          <button
-            type="button"
-            onClick={handleReset}
-            className="font-display text-2xl font-normal tracking-[-0.5px] select-none"
-            aria-label="EGO — volver al inicio"
-          >
-            <span className="text-g-red">E</span>
-            <span className="text-g-blue">G</span>
-            <span className="text-g-yellow">O</span>
-          </button>
-        </header>
-
-        <main className="flex-1 w-full max-w-2xl mx-auto px-5 sm:px-6 pb-28 flex flex-col gap-6">
-          <div>
-            <div className="flex justify-end">
-              <p className="bg-[#eef1f6] rounded-[20px_20px_4px_20px] px-[18px] py-3 max-w-[86%] text-[15.5px] leading-relaxed">
-                {caseMeta.quote}
-              </p>
-            </div>
-            <div className="flex justify-end mt-2">
-              <span className="font-mono text-[11px] tracking-[0.5px] text-[#5f6368]">
-                {t.caseLabel} {caseMeta.caseId} · {caseMeta.time}
-              </span>
-            </div>
-          </div>
-
-          {status === "loading" && (
-            <div aria-live="polite" className="flex items-center gap-3 text-[15px] py-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-[#4285f4] animate-pulse" />
-              <span className="ego-shimmer-text font-medium tabular-nums">
-                {t.loadingPrefix}
-                {elapsedSeconds > 0 ? ` — ${elapsedSeconds}s` : "…"}
-              </span>
-            </div>
-          )}
-
-          {status === "error" && (
-            <div role="alert" className="flex flex-col gap-3 py-2">
-              <p className="text-[15px] text-[#5f6368] leading-relaxed max-w-[62ch]">{errorMessage}</p>
-              <button
-                type="button"
-                onClick={handleRetry}
-                className="self-start text-[#1a73e8] text-sm font-medium hover:underline"
-              >
-                {t.retry}
-              </button>
-            </div>
-          )}
-
-          {status === "success" && diagnosis && (
-            <>
-              <span className="inline-flex items-center gap-1.5 self-start bg-[#fef7e0] text-[#7a5b00] rounded-full px-3 py-1.5 text-[12.5px] font-medium">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M12 2 3 7v6c0 5 4 8.5 9 9 5-.5 9-4 9-9V7l-9-5Z"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                {diagnosis.sesgo_identificado}
-              </span>
-
-              <div>
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5">
-                    <SpeakButton
-                      active={speakStatus === "playing" && speakSource === "diagnosis"}
-                      loading={speakStatus === "loading" && speakSource === "diagnosis"}
-                      onClick={() => toggleSpeak(diagnosis.cuerpo_diagnostico, "diagnosis")}
-                      labelStart={t.speakStart}
-                      labelStop={t.speakStop}
-                      labelLoading={t.speakLoading}
-                    />
-                  </div>
-                  <div
-                    className="flex-none mt-0.5 flex items-center gap-0.5 bg-[#f1f3f4] rounded-full p-0.5 h-[34px]"
-                    role="group"
-                    aria-label={`${t.voiceMale} / ${t.voiceFemale}`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setVoiceGender("m")}
-                      aria-pressed={voiceGender === "m"}
-                      aria-label={t.voiceMale}
-                      title={t.voiceMale}
-                      className={
-                        "w-[26px] h-[26px] rounded-full text-[11px] font-semibold transition-colors " +
-                        (voiceGender === "m"
-                          ? "bg-white text-[#1b1c1e] shadow-sm"
-                          : "text-[#5f6368] hover:text-[#1b1c1e]")
-                      }
-                    >
-                      M
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setVoiceGender("f")}
-                      aria-pressed={voiceGender === "f"}
-                      aria-label={t.voiceFemale}
-                      title={t.voiceFemale}
-                      className={
-                        "w-[26px] h-[26px] rounded-full text-[11px] font-semibold transition-colors " +
-                        (voiceGender === "f"
-                          ? "bg-white text-[#1b1c1e] shadow-sm"
-                          : "text-[#5f6368] hover:text-[#1b1c1e]")
-                      }
-                    >
-                      F
-                    </button>
-                  </div>
-                </div>
-                <p className="text-[16px] leading-[1.75] text-[#1b1c1e] max-w-[64ch] mt-3.5">
-                  {diagnosis.cuerpo_diagnostico}
-                </p>
-                {speakStatus === "error" && speakSource === "diagnosis" && speakError && (
-                  <p className="text-[#d93025] text-[13px] mt-2">{speakError}</p>
-                )}
-              </div>
-
-              {diagnosis.nota_seguridad && (
-                <div
-                  role="alert"
-                  className="flex gap-3 bg-[#fce8e6] border border-[#c5221f]/25 text-[#8c1d18] rounded-xl px-4 py-3.5 text-[14px] leading-[1.55]"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="flex-none mt-0.5">
-                    <path d="M12 3 2 20h20L12 3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-                    <path d="M12 9v5M12 17.2v.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                  </svg>
-                  <p>{diagnosis.nota_seguridad}</p>
-                </div>
-              )}
-
-              <div>
-                <div className="flex items-center gap-2 mb-2.5">
-                  <p className="text-[12.5px] font-semibold tracking-[0.4px] uppercase text-[#5f6368]">
-                    {t.accionTactica}
-                  </p>
-                  {diagnosis.prescripcion_fisica && (
-                    <span className="bg-[#e6f4ea] text-[#1e7d37] text-[11px] font-medium rounded-full px-2 py-0.5">
-                      {t.incluyeAccionFisica}
-                    </span>
-                  )}
-                </div>
-                <ol className="flex flex-col gap-2.5 list-none">
-                  {diagnosis.accion_tactica.map((a, i) => (
-                    <ActionItem key={i} text={a} />
-                  ))}
-                </ol>
-              </div>
-
-              {diagnosis.pregunta_espejo && (
-                <div className="border-t border-[#e8eaed] pt-5">
-                  <p className="text-[12.5px] font-semibold tracking-[0.4px] uppercase text-[#5f6368] mb-2">
-                    {t.antesDeCerrarEsto}
-                  </p>
-                  <p className="text-[17px] leading-[1.6] italic text-[#1b1c1e] max-w-[60ch]">
-                    {diagnosis.pregunta_espejo}
-                  </p>
-
-                  {!segundaLectura && !segundaNotaSeguridad && !diagnosis.nota_seguridad && (
-                    <form onSubmit={handleSegundaLecturaSubmit} className="mt-4 max-w-[60ch]">
-                      <label htmlFor="ego-respuesta-input" className="sr-only">
-                        {t.respuestaLabel}
-                      </label>
-                      <div className="flex items-end gap-3 border-b border-[#dfe1e5] focus-within:border-[#1a73e8] transition-colors">
-                        <input
-                          id="ego-respuesta-input"
-                          value={respuestaEspejo}
-                          onChange={(e) => setRespuestaEspejo(e.target.value)}
-                          placeholder={t.respuestaPlaceholder}
-                          autoComplete="off"
-                          maxLength={500}
-                          disabled={segundaLecturaStatus === "loading"}
-                          className="flex-1 min-w-0 outline-none bg-transparent text-[15px] text-[#1b1c1e] placeholder:text-[#9aa0a6] py-2"
-                        />
-                        <button
-                          type="submit"
-                          disabled={!respuestaEspejo.trim() || segundaLecturaStatus === "loading"}
-                          className="text-[#1a73e8] text-[13px] font-medium py-2 disabled:text-[#c7cad1] disabled:cursor-not-allowed hover:underline"
-                        >
-                          {t.respuestaSubmit}
-                        </button>
-                      </div>
-                      {segundaLecturaStatus === "loading" && (
-                        <span className="ego-shimmer-text text-[13px] font-medium tabular-nums inline-block mt-2">
-                          {t.respuestaLoading}
-                          {elapsedSeconds2 > 0 ? ` — ${elapsedSeconds2}s` : "…"}
-                        </span>
-                      )}
-                      {segundaLecturaStatus === "error" && (
-                        <p className="text-[#d93025] text-[13px] mt-2">{segundaLecturaError}</p>
-                      )}
-                    </form>
-                  )}
-                </div>
-              )}
-
-              {segundaLectura && (
-                <div className="border-t border-[#e8eaed] pt-5">
-                  <div className="flex items-center gap-2 mb-2">
-                    <p className="text-[12.5px] font-semibold tracking-[0.4px] uppercase text-[#5f6368]">
-                      {t.segundaLecturaLabel}
-                    </p>
-                    <SpeakButton
-                      size={26}
-                      active={speakStatus === "playing" && speakSource === "segunda"}
-                      loading={speakStatus === "loading" && speakSource === "segunda"}
-                      onClick={() => toggleSpeak(segundaLectura, "segunda")}
-                      labelStart={t.speakStart}
-                      labelStop={t.speakStop}
-                      labelLoading={t.speakLoading}
-                    />
-                  </div>
-                  <p className="text-[16px] leading-[1.7] text-[#1b1c1e] max-w-[60ch]">{segundaLectura}</p>
-                  {speakStatus === "error" && speakSource === "segunda" && speakError && (
-                    <p className="text-[#d93025] text-[13px] mt-2">{speakError}</p>
-                  )}
-
-                  {preguntaFinal && (
-                    <>
-                      <p className="text-[17px] leading-[1.6] italic text-[#1b1c1e] max-w-[60ch] mt-4">
-                        {preguntaFinal}
-                      </p>
-
-                      {!terceraLectura && !terceraNotaSeguridad && (
-                        <form onSubmit={handleTerceraLecturaSubmit} className="mt-4 max-w-[60ch]">
-                          <label htmlFor="ego-respuesta-input-2" className="sr-only">
-                            {t.respuestaLabel}
-                          </label>
-                          <div className="flex items-end gap-3 border-b border-[#dfe1e5] focus-within:border-[#1a73e8] transition-colors">
-                            <input
-                              id="ego-respuesta-input-2"
-                              value={respuestaEspejo2}
-                              onChange={(e) => setRespuestaEspejo2(e.target.value)}
-                              placeholder={t.respuestaPlaceholder}
-                              autoComplete="off"
-                              maxLength={500}
-                              disabled={terceraLecturaStatus === "loading"}
-                              className="flex-1 min-w-0 outline-none bg-transparent text-[15px] text-[#1b1c1e] placeholder:text-[#9aa0a6] py-2"
-                            />
-                            <button
-                              type="submit"
-                              disabled={!respuestaEspejo2.trim() || terceraLecturaStatus === "loading"}
-                              className="text-[#1a73e8] text-[13px] font-medium py-2 disabled:text-[#c7cad1] disabled:cursor-not-allowed hover:underline"
-                            >
-                              {t.respuestaSubmit}
-                            </button>
-                          </div>
-                          {terceraLecturaStatus === "loading" && (
-                            <span className="ego-shimmer-text text-[13px] font-medium tabular-nums inline-block mt-2">
-                              {t.respuesta2Loading}
-                              {elapsedSeconds3 > 0 ? ` — ${elapsedSeconds3}s` : "…"}
-                            </span>
-                          )}
-                          {terceraLecturaStatus === "error" && (
-                            <p className="text-[#d93025] text-[13px] mt-2">{terceraLecturaError}</p>
-                          )}
-                        </form>
-                      )}
-
-                      {showPaywall && !terceraLectura && !terceraNotaSeguridad && (
-                        <div className="mt-5 max-w-[60ch] border border-[#e8eaed] rounded-2xl p-5 flex flex-col gap-4">
-                          <div>
-                            <p className="text-[15px] font-semibold text-[#1b1c1e]">{t.paywallTitle}</p>
-                            <p className="text-[13.5px] text-[#5f6368] leading-relaxed mt-1">{t.paywallBody}</p>
-                          </div>
-
-                          <div className="flex flex-col sm:flex-row gap-3">
-                            <button
-                              type="button"
-                              onClick={() => void handleSubscribe("monthly")}
-                              disabled={checkoutLoadingPlan !== null}
-                              className="flex-1 border border-[#dfe1e5] rounded-xl px-4 py-3 text-left hover:border-[#1a73e8] transition-colors disabled:opacity-60"
-                            >
-                              <span className="block text-[13px] text-[#5f6368]">{t.paywallMonthly}</span>
-                              <span className="block text-[17px] font-semibold text-[#1b1c1e] mt-0.5">
-                                {t.paywallMonthlyPrice}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleSubscribe("annual")}
-                              disabled={checkoutLoadingPlan !== null}
-                              className="flex-1 border-2 border-[#1a73e8] rounded-xl px-4 py-3 text-left relative disabled:opacity-60"
-                            >
-                              <span className="block text-[13px] text-[#1a73e8] font-medium">{t.paywallAnnual}</span>
-                              <span className="block text-[17px] font-semibold text-[#1b1c1e] mt-0.5">
-                                {t.paywallAnnualPrice}
-                              </span>
-                              <span className="block text-[12px] text-[#5f6368] mt-0.5">{t.paywallAnnualNote}</span>
-                            </button>
-                          </div>
-
-                          {checkoutLoadingPlan && (
-                            <span className="ego-shimmer-text text-[13px] font-medium inline-block">
-                              {t.paywallOpeningTab}
-                            </span>
-                          )}
-                          {!checkoutLoadingPlan && (
-                            <p className="text-[12.5px] text-[#9aa0a6]">{t.paywallNewTabNote}</p>
-                          )}
-                          {checkoutError && <p className="text-[#d93025] text-[13px]">{checkoutError}</p>}
-
-                          <div className="border-t border-[#e8eaed] pt-4">
-                            <p className="text-[13px] text-[#5f6368] mb-2">{t.paywallAlreadyMember}</p>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="email"
-                                value={memberEmailInput}
-                                onChange={(e) => setMemberEmailInput(e.target.value)}
-                                placeholder={t.paywallEmailPlaceholder}
-                                autoComplete="email"
-                                disabled={verifyMemberStatus === "checking"}
-                                className="flex-1 min-w-0 border border-[#dfe1e5] rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#1a73e8]"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => void handleVerifyMember()}
-                                disabled={!memberEmailInput.trim() || verifyMemberStatus === "checking"}
-                                className="text-[#1a73e8] text-[13px] font-medium px-3 py-2 disabled:text-[#c7cad1] disabled:cursor-not-allowed hover:underline whitespace-nowrap"
-                              >
-                                {verifyMemberStatus === "checking" ? t.paywallVerifying : t.paywallVerify}
-                              </button>
-                            </div>
-                            {verifyMemberStatus === "error" && (
-                              <p className="text-[#d93025] text-[13px] mt-2">{t.paywallVerifyError}</p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-
-              {segundaNotaSeguridad && (
-                <div
-                  role="alert"
-                  className="flex gap-3 bg-[#fce8e6] border border-[#c5221f]/25 text-[#8c1d18] rounded-xl px-4 py-3.5 text-[14px] leading-[1.55]"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="flex-none mt-0.5">
-                    <path d="M12 3 2 20h20L12 3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-                    <path d="M12 9v5M12 17.2v.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                  </svg>
-                  <p>{segundaNotaSeguridad}</p>
-                </div>
-              )}
-
-              {terceraLectura && (
-                <div className="border-t border-[#e8eaed] pt-5">
-                  <div className="flex items-center gap-2 mb-2">
-                    <p className="text-[12.5px] font-semibold tracking-[0.4px] uppercase text-[#5f6368]">
-                      {t.terceraLecturaLabel}
-                    </p>
-                    <SpeakButton
-                      size={26}
-                      active={speakStatus === "playing" && speakSource === "tercera"}
-                      loading={speakStatus === "loading" && speakSource === "tercera"}
-                      onClick={() => toggleSpeak(terceraLectura, "tercera")}
-                      labelStart={t.speakStart}
-                      labelStop={t.speakStop}
-                      labelLoading={t.speakLoading}
-                    />
-                  </div>
-                  <p className="text-[16px] leading-[1.7] text-[#1b1c1e] max-w-[60ch]">{terceraLectura}</p>
-                  {speakStatus === "error" && speakSource === "tercera" && speakError && (
-                    <p className="text-[#d93025] text-[13px] mt-2">{speakError}</p>
-                  )}
-                </div>
-              )}
-
-              {terceraNotaSeguridad && (
-                <div
-                  role="alert"
-                  className="flex gap-3 bg-[#fce8e6] border border-[#c5221f]/25 text-[#8c1d18] rounded-xl px-4 py-3.5 text-[14px] leading-[1.55]"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="flex-none mt-0.5">
-                    <path d="M12 3 2 20h20L12 3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-                    <path d="M12 9v5M12 17.2v.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                  </svg>
-                  <p>{terceraNotaSeguridad}</p>
-                </div>
-              )}
-
-              {(!diagnosis.pregunta_espejo ||
-                diagnosis.nota_seguridad ||
-                segundaNotaSeguridad ||
-                segundaLecturaStatus === "error" ||
-                (segundaLectura && !preguntaFinal) ||
-                terceraLectura ||
-                terceraNotaSeguridad ||
-                terceraLecturaStatus === "error") && (
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="self-start text-[#9aa0a6] text-[13px] hover:text-[#5f6368] hover:underline mt-8"
-                >
-                  {t.newQuery}
-                </button>
-              )}
-            </>
-          )}
-        </main>
-      </div>
-    );
-  }
-
   const tHome = UI_STRINGS[homeLang];
+  const t = caseMeta ? UI_STRINGS[detectUiLang(caseMeta.quote)] : tHome;
+
+  const showResetLink =
+    Boolean(diagnosis) &&
+    (!diagnosis?.pregunta_espejo ||
+      diagnosis?.nota_seguridad ||
+      segundaNotaSeguridad ||
+      segundaLecturaStatus === "error" ||
+      (segundaLectura && !preguntaFinal) ||
+      terceraLectura ||
+      terceraNotaSeguridad ||
+      terceraLecturaStatus === "error");
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-white px-6 relative">
-      <div className="absolute top-5 right-5 sm:top-6 sm:right-8 flex items-center gap-0.5 bg-[#f1f3f4] rounded-full p-0.5 text-[11px] font-semibold tracking-wide">
-        <button
-          type="button"
-          onClick={() => setUiLang("es")}
-          aria-pressed={homeLang === "es"}
-          aria-label="Español"
-          className={
-            "px-2.5 py-1 rounded-full transition-colors " +
-            (homeLang === "es" ? "bg-white text-[#1b1c1e] shadow-sm" : "text-[#5f6368] hover:text-[#1b1c1e]")
-          }
-        >
+    <div className="ego-room">
+      <ParticleStage ref={particleStageRef} />
+      <div className="hearth-glow" aria-hidden="true" />
+      <div className="scrim" aria-hidden="true" />
+
+      <button type="button" className="brandmark" onClick={handleReset} aria-label="EGO — volver al inicio">
+        EGO
+      </button>
+
+      <div className="lang-toggle" role="group" aria-label="Idioma / language">
+        <button type="button" onClick={() => setUiLang("es")} aria-pressed={homeLang === "es"} aria-label="Español">
           ES
         </button>
-        <button
-          type="button"
-          onClick={() => setUiLang("en")}
-          aria-pressed={homeLang === "en"}
-          aria-label="English"
-          className={
-            "px-2.5 py-1 rounded-full transition-colors " +
-            (homeLang === "en" ? "bg-white text-[#1b1c1e] shadow-sm" : "text-[#5f6368] hover:text-[#1b1c1e]")
-          }
-        >
+        <button type="button" onClick={() => setUiLang("en")} aria-pressed={homeLang === "en"} aria-label="English">
           EN
         </button>
       </div>
-      <p className="absolute bottom-2 inset-x-0 text-center text-[#c7cacd] text-[7px] whitespace-nowrap tracking-tight">
-        <Link href="/privacidad" className="hover:text-[#9aa0a6] hover:underline">
-          Privacidad
-        </Link>
-        {" · "}
-        <Link href="/terminos" className="hover:text-[#9aa0a6] hover:underline">
-          Términos
-        </Link>
-      </p>
-      <main className="w-full max-w-xl flex flex-col items-center gap-7 -mt-[8vh]">
-        {postCheckoutNotice && (
-          <p
-            className={
-              "text-[13px] rounded-full px-4 py-2 " +
-              (postCheckoutNotice === "success"
-                ? "bg-[#e6f4ea] text-[#137333]"
-                : "bg-[#f1f3f4] text-[#5f6368]")
-            }
-          >
-            {postCheckoutNotice === "success" ? tHome.postCheckoutSuccess : tHome.postCheckoutCancelled}
-          </p>
-        )}
-        <h1 className="font-display text-[56px] sm:text-[90px] font-medium tracking-[6px] leading-none select-none">
-          <span className="text-g-red">E</span>
-          <span className="text-g-blue">G</span>
-          <span className="text-g-yellow">O</span>
-        </h1>
 
-        <form onSubmit={handleSubmit} className="w-full flex flex-col items-center gap-6">
-          <label htmlFor="ego-hook-input" className="sr-only">
-            {tHome.homeInputLabel}
-          </label>
-          <div className="w-full flex items-center gap-3 bg-white border border-[#dfe1e5] rounded-full px-5 py-3 shadow-[0_1px_6px_rgba(32,33,36,0.18)] focus-within:shadow-[0_1px_8px_rgba(32,33,36,0.32)] focus-within:border-transparent transition-shadow">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-              className="text-[#5f6368] shrink-0"
-            >
-              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-              <line
-                x1="16.6"
-                y1="16.6"
-                x2="21"
-                y2="21"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
-            <input
-              id="ego-hook-input"
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder={listening ? tHome.homeListening : tHome.homePlaceholder}
-              autoComplete="off"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              maxLength={1000}
-              data-1p-ignore="true"
-              data-lpignore="true"
-              data-bwignore="true"
-              data-form-type="other"
-              className="flex-1 min-w-0 outline-none focus:outline-none focus-visible:outline-none appearance-none text-[17px] text-[#202124] placeholder:text-[#5f6368] bg-transparent"
-            />
-            {micSupported && (
-              <button
-                type="button"
-                onClick={handleMicToggle}
-                aria-label={listening ? tHome.micStop : tHome.micStart}
-                aria-pressed={listening}
-                className="relative shrink-0 flex items-center justify-center w-7 h-7 -mr-1 rounded-full"
-              >
-                {listening && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute inset-0 rounded-full bg-[#ea4335]/20 animate-ping"
-                  />
-                )}
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  aria-hidden="true"
-                  className={listening ? "text-[#ea4335] relative" : "text-[#5f6368] hover:text-[#202124] relative"}
-                >
-                  <path
-                    d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M19 11a7 7 0 0 1-14 0"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <line
-                    x1="12"
-                    y1="19"
-                    x2="12"
-                    y2="22"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
-          {micError && (
-            <p role="status" className="text-[#d93025] text-xs text-center -mt-3">
-              {micError}
+      <main className="ego-main">
+        <section className={"home-screen" + (homeLeaving ? " leaving" : "")}>
+          <div className="home-voice-space" aria-hidden="true" />
+
+          {postCheckoutNotice && (
+            <p className={"notice-pill " + (postCheckoutNotice === "success" ? "success" : "neutral")}>
+              {postCheckoutNotice === "success" ? tHome.postCheckoutSuccess : tHome.postCheckoutCancelled}
             </p>
           )}
-          {/*
-            El botón visible se quitó a petición del propietario del
-            producto (el buscador ya envía con Enter, como en Google).
-            Se deja este mismo botón invisible en vez de borrarlo del
-            DOM: mantiene exactamente el mismo alto reservado en el
-            layout, así el texto de abajo no sube de sitio, y sigue
-            siendo el submit por defecto del formulario. invisible +
-            tabIndex=-1 lo sacan del foco y de los lectores de pantalla.
-          */}
-          <button
-            type="submit"
-            tabIndex={-1}
-            aria-hidden="true"
-            className="invisible pointer-events-none select-none bg-[#f8f9fa] border border-[#f8f9fa] rounded text-[#1a73e8] text-sm px-5 py-2.5"
-          >
-            Auditar decisión
-          </button>
-        </form>
 
-        <div className="flex flex-col items-center gap-1.5">
-          <p className="text-[#5f6368] text-[13px] text-center max-w-[380px]">
-            {tHome.homeFooterPrivacy}
-          </p>
-          <p className="text-[#9aa0a6] text-[9px] text-center whitespace-nowrap tracking-tight">
-            {tHome.homeFooterAnon}
-          </p>
-        </div>
+          <p className="tagline">{tHome.homeFooterPrivacy}</p>
+
+          <form onSubmit={handleSubmit} className="ask">
+            <label htmlFor="ego-hook-input" className="sr-only">
+              {tHome.homeInputLabel}
+            </label>
+            <div className="field">
+              <input
+                id="ego-hook-input"
+                ref={inputRef}
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder={listening ? tHome.homeListening : tHome.homePlaceholder}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={1000}
+                data-1p-ignore="true"
+                data-lpignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+              />
+              {micSupported && (
+                <button
+                  type="button"
+                  className="mic-btn"
+                  onClick={handleMicToggle}
+                  aria-label={listening ? tHome.micStop : tHome.micStart}
+                  aria-pressed={listening}
+                >
+                  {listening && <span className="mic-ping" aria-hidden="true" />}
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ position: "relative" }}>
+                    <path
+                      d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path d="M19 11a7 7 0 0 1-14 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <line x1="12" y1="19" x2="12" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {micError && (
+              <p role="status" className="mic-error">
+                {micError}
+              </p>
+            )}
+            {/*
+              El botón visible se quitó a petición del propietario del
+              producto (el buscador ya envía con Enter, como en Google).
+              Se deja este mismo botón invisible en vez de borrarlo del
+              DOM: mantiene exactamente el mismo alto reservado en el
+              layout, así el texto de abajo no sube de sitio, y sigue
+              siendo el submit por defecto del formulario. invisible +
+              tabIndex=-1 lo sacan del foco y de los lectores de pantalla.
+            */}
+            <button type="submit" tabIndex={-1} aria-hidden="true" className="primary invisible pointer-events-none select-none">
+              Auditar decisión
+            </button>
+          </form>
+
+          <p className="privacy-note">{tHome.homeFooterAnon}</p>
+        </section>
+
+        <section className={"verdict-screen" + (verdictEntering ? " entering" : "")}>
+          <div className="voice-space" aria-hidden="true" />
+
+          {caseMeta && (
+            <>
+              <p className="quote-bubble">{caseMeta.quote}</p>
+              <span className="case-tag">
+                {t.caseLabel} {caseMeta.caseId} · {caseMeta.time}
+              </span>
+
+              {status === "loading" && (
+                <div aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: "inline-block",
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: "var(--frost)",
+                    }}
+                  />
+                  <span className="shimmer" style={{ fontWeight: 500 }}>
+                    {t.loadingPrefix}
+                    {elapsedSeconds > 0 ? ` — ${elapsedSeconds}s` : "…"}
+                  </span>
+                </div>
+              )}
+
+              {status === "error" && (
+                <div role="alert" style={{ display: "flex", flexDirection: "column", gap: 12, textAlign: "left", maxWidth: "60ch" }}>
+                  <p className="error-text">{errorMessage}</p>
+                  <button type="button" onClick={handleRetry} className="retry-link">
+                    {t.retry}
+                  </button>
+                </div>
+              )}
+
+              {status === "success" && diagnosis && (
+                <>
+                  <span className="section-label">{diagnosis.sesgo_identificado}</span>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, width: "100%" }}>
+                    <p className="cuerpo">{diagnosis.cuerpo_diagnostico}</p>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                      <SpeakButton
+                        active={speakStatus === "playing" && speakSource === "diagnosis"}
+                        loading={speakStatus === "loading" && speakSource === "diagnosis"}
+                        onClick={() => toggleSpeak(diagnosis.cuerpo_diagnostico, "diagnosis")}
+                        labelStart={t.speakStart}
+                        labelStop={t.speakStop}
+                        labelLoading={t.speakLoading}
+                      />
+                      <div className="pill-toggle" role="group" aria-label={`${t.voiceMale} / ${t.voiceFemale}`}>
+                        <button type="button" onClick={() => setVoiceGender("m")} aria-pressed={voiceGender === "m"} aria-label={t.voiceMale} title={t.voiceMale}>
+                          M
+                        </button>
+                        <button type="button" onClick={() => setVoiceGender("f")} aria-pressed={voiceGender === "f"} aria-label={t.voiceFemale} title={t.voiceFemale}>
+                          F
+                        </button>
+                      </div>
+                    </div>
+                    {speakStatus === "error" && speakSource === "diagnosis" && speakError && (
+                      <p className="error-text">{speakError}</p>
+                    )}
+                  </div>
+
+                  {diagnosis.nota_seguridad && (
+                    <div role="alert" className="safety-box">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ flex: "none", marginTop: 2 }}>
+                        <path d="M12 3 2 20h20L12 3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                        <path d="M12 9v5M12 17.2v.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                      </svg>
+                      <p>{diagnosis.nota_seguridad}</p>
+                    </div>
+                  )}
+
+                  <div style={{ width: "100%", textAlign: "left" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                      <p className="section-label" style={{ color: "var(--ash)" }}>
+                        {t.accionTactica}
+                      </p>
+                      {diagnosis.prescripcion_fisica && (
+                        <span style={{ fontSize: 11, color: "var(--frost)", opacity: 0.85 }}>· {t.incluyeAccionFisica}</span>
+                      )}
+                    </div>
+                    <ol className="action-list">
+                      {diagnosis.accion_tactica.map((a, i) => (
+                        <ActionItem key={i} text={a} />
+                      ))}
+                    </ol>
+                  </div>
+
+                  {diagnosis.pregunta_espejo && (
+                    <div style={{ width: "100%", borderTop: "1px solid var(--line)", paddingTop: 20, display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start" }}>
+                      <p className="section-label" style={{ color: "var(--ash)" }}>
+                        {t.antesDeCerrarEsto}
+                      </p>
+                      <p className="pregunta">{diagnosis.pregunta_espejo}</p>
+
+                      {!segundaLectura && !segundaNotaSeguridad && !diagnosis.nota_seguridad && (
+                        <form onSubmit={handleSegundaLecturaSubmit} className="answer-form">
+                          <label htmlFor="ego-respuesta-input" className="sr-only">
+                            {t.respuestaLabel}
+                          </label>
+                          <div className="field-row">
+                            <input
+                              id="ego-respuesta-input"
+                              value={respuestaEspejo}
+                              onChange={(e) => setRespuestaEspejo(e.target.value)}
+                              placeholder={t.respuestaPlaceholder}
+                              autoComplete="off"
+                              maxLength={500}
+                              disabled={segundaLecturaStatus === "loading"}
+                            />
+                            <button type="submit" disabled={!respuestaEspejo.trim() || segundaLecturaStatus === "loading"}>
+                              {t.respuestaSubmit}
+                            </button>
+                          </div>
+                          {segundaLecturaStatus === "loading" && (
+                            <span className="shimmer" style={{ fontSize: 13, fontWeight: 500, display: "inline-block", marginTop: 8 }}>
+                              {t.respuestaLoading}
+                              {elapsedSeconds2 > 0 ? ` — ${elapsedSeconds2}s` : "…"}
+                            </span>
+                          )}
+                          {segundaLecturaStatus === "error" && (
+                            <p className="error-text" style={{ marginTop: 8 }}>
+                              {segundaLecturaError}
+                            </p>
+                          )}
+                        </form>
+                      )}
+                    </div>
+                  )}
+
+                  {segundaLectura && (
+                    <div style={{ width: "100%", borderTop: "1px solid var(--line)", paddingTop: 20, display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <p className="section-label" style={{ color: "var(--ash)" }}>
+                          {t.segundaLecturaLabel}
+                        </p>
+                        <SpeakButton
+                          active={speakStatus === "playing" && speakSource === "segunda"}
+                          loading={speakStatus === "loading" && speakSource === "segunda"}
+                          onClick={() => toggleSpeak(segundaLectura, "segunda")}
+                          labelStart={t.speakStart}
+                          labelStop={t.speakStop}
+                          labelLoading={t.speakLoading}
+                        />
+                      </div>
+                      <p className="cuerpo">{segundaLectura}</p>
+                      {speakStatus === "error" && speakSource === "segunda" && speakError && (
+                        <p className="error-text">{speakError}</p>
+                      )}
+
+                      {preguntaFinal && (
+                        <>
+                          <p className="pregunta">{preguntaFinal}</p>
+
+                          {!terceraLectura && !terceraNotaSeguridad && (
+                            <form onSubmit={handleTerceraLecturaSubmit} className="answer-form">
+                              <label htmlFor="ego-respuesta-input-2" className="sr-only">
+                                {t.respuestaLabel}
+                              </label>
+                              <div className="field-row">
+                                <input
+                                  id="ego-respuesta-input-2"
+                                  value={respuestaEspejo2}
+                                  onChange={(e) => setRespuestaEspejo2(e.target.value)}
+                                  placeholder={t.respuestaPlaceholder}
+                                  autoComplete="off"
+                                  maxLength={500}
+                                  disabled={terceraLecturaStatus === "loading"}
+                                />
+                                <button type="submit" disabled={!respuestaEspejo2.trim() || terceraLecturaStatus === "loading"}>
+                                  {t.respuestaSubmit}
+                                </button>
+                              </div>
+                              {terceraLecturaStatus === "loading" && (
+                                <span className="shimmer" style={{ fontSize: 13, fontWeight: 500, display: "inline-block", marginTop: 8 }}>
+                                  {t.respuesta2Loading}
+                                  {elapsedSeconds3 > 0 ? ` — ${elapsedSeconds3}s` : "…"}
+                                </span>
+                              )}
+                              {terceraLecturaStatus === "error" && (
+                                <p className="error-text" style={{ marginTop: 8 }}>
+                                  {terceraLecturaError}
+                                </p>
+                              )}
+                            </form>
+                          )}
+
+                          {showPaywall && !terceraLectura && !terceraNotaSeguridad && (
+                            <div className="paywall-card">
+                              <div>
+                                <p style={{ fontSize: 15, fontWeight: 600, color: "var(--paper)" }}>{t.paywallTitle}</p>
+                                <p style={{ fontSize: 13.5, color: "var(--ash)", lineHeight: 1.5, marginTop: 4 }}>{t.paywallBody}</p>
+                              </div>
+
+                              <div className="paywall-plans">
+                                <button type="button" className="plan-btn" onClick={() => void handleSubscribe("monthly")} disabled={checkoutLoadingPlan !== null}>
+                                  <span className="plan-name">{t.paywallMonthly}</span>
+                                  <span className="plan-price">{t.paywallMonthlyPrice}</span>
+                                </button>
+                                <button type="button" className="plan-btn featured" onClick={() => void handleSubscribe("annual")} disabled={checkoutLoadingPlan !== null}>
+                                  <span className="plan-name">{t.paywallAnnual}</span>
+                                  <span className="plan-price">{t.paywallAnnualPrice}</span>
+                                  <span className="plan-note">{t.paywallAnnualNote}</span>
+                                </button>
+                              </div>
+
+                              {checkoutLoadingPlan && <span className="shimmer" style={{ fontSize: 13, fontWeight: 500 }}>{t.paywallOpeningTab}</span>}
+                              {!checkoutLoadingPlan && <p style={{ fontSize: 12.5, color: "var(--ash)" }}>{t.paywallNewTabNote}</p>}
+                              {checkoutError && <p className="error-text">{checkoutError}</p>}
+
+                              <div className="member-row">
+                                <p style={{ fontSize: 13, color: "var(--ash)", marginBottom: 8 }}>{t.paywallAlreadyMember}</p>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <input
+                                    type="email"
+                                    className="verify-input"
+                                    value={memberEmailInput}
+                                    onChange={(e) => setMemberEmailInput(e.target.value)}
+                                    placeholder={t.paywallEmailPlaceholder}
+                                    autoComplete="email"
+                                    disabled={verifyMemberStatus === "checking"}
+                                  />
+                                  <button type="button" className="verify-btn" onClick={() => void handleVerifyMember()} disabled={!memberEmailInput.trim() || verifyMemberStatus === "checking"}>
+                                    {verifyMemberStatus === "checking" ? t.paywallVerifying : t.paywallVerify}
+                                  </button>
+                                </div>
+                                {verifyMemberStatus === "error" && <p className="error-text" style={{ marginTop: 8 }}>{t.paywallVerifyError}</p>}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {segundaNotaSeguridad && (
+                    <div role="alert" className="safety-box">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ flex: "none", marginTop: 2 }}>
+                        <path d="M12 3 2 20h20L12 3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                        <path d="M12 9v5M12 17.2v.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                      </svg>
+                      <p>{segundaNotaSeguridad}</p>
+                    </div>
+                  )}
+
+                  {terceraLectura && (
+                    <div style={{ width: "100%", borderTop: "1px solid var(--line)", paddingTop: 20, display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <p className="section-label" style={{ color: "var(--ash)" }}>
+                          {t.terceraLecturaLabel}
+                        </p>
+                        <SpeakButton
+                          active={speakStatus === "playing" && speakSource === "tercera"}
+                          loading={speakStatus === "loading" && speakSource === "tercera"}
+                          onClick={() => toggleSpeak(terceraLectura, "tercera")}
+                          labelStart={t.speakStart}
+                          labelStop={t.speakStop}
+                          labelLoading={t.speakLoading}
+                        />
+                      </div>
+                      <p className="cuerpo">{terceraLectura}</p>
+                      {speakStatus === "error" && speakSource === "tercera" && speakError && (
+                        <p className="error-text">{speakError}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {terceraNotaSeguridad && (
+                    <div role="alert" className="safety-box">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ flex: "none", marginTop: 2 }}>
+                        <path d="M12 3 2 20h20L12 3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                        <path d="M12 9v5M12 17.2v.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                      </svg>
+                      <p>{terceraNotaSeguridad}</p>
+                    </div>
+                  )}
+
+                  {showResetLink && (
+                    <button type="button" onClick={handleReset} className="reset-link" style={{ marginTop: 12 }}>
+                      {t.newQuery}
+                    </button>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </section>
       </main>
+
+      <p className="legal-links">
+        <Link href="/privacidad">Privacidad</Link> · <Link href="/terminos">Términos</Link>
+      </p>
+
+      <style jsx>{`
+        .ego-room {
+          --ink-black: #0b0906;
+          --frost: #6fa0d8;
+          --frost-dim: #3c5b7d;
+          --hearth-rgb: 111, 160, 216;
+          --paper: #f2ead9;
+          --ash: #8a8072;
+          --line: #201a12;
+          --warn: #e2a08c;
+          --warn-line: rgba(226, 160, 140, 0.35);
+          --warn-bg: rgba(226, 160, 140, 0.08);
+          --ok: #9bd6ab;
+          position: relative;
+          min-height: 100vh;
+          width: 100%;
+          background: var(--ink-black);
+          color: var(--paper);
+          overflow-x: hidden;
+          font-family: "Work Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        .hearth-glow {
+          position: fixed;
+          left: 50%;
+          top: 50%;
+          width: min(120vw, 900px);
+          height: min(120vw, 900px);
+          transform: translate(-50%, -50%);
+          z-index: 0;
+          pointer-events: none;
+          background: radial-gradient(circle, rgba(var(--hearth-rgb), 0.16) 0%, rgba(var(--hearth-rgb), 0.06) 35%, rgba(var(--hearth-rgb), 0) 68%);
+        }
+
+        .scrim {
+          position: fixed;
+          inset: 0;
+          z-index: 0;
+          pointer-events: none;
+          background: radial-gradient(ellipse 60% 46% at 50% 40%, rgba(11, 9, 6, 0.6) 0%, rgba(11, 9, 6, 0.3) 55%, rgba(9, 12, 18, 0) 100%);
+        }
+
+        .brandmark {
+          position: fixed;
+          top: max(14px, env(safe-area-inset-top, 0px));
+          left: 18px;
+          z-index: 5;
+          margin: 0;
+          background: none;
+          border: none;
+          padding: 0;
+          cursor: pointer;
+          font-family: "Work Sans", sans-serif;
+          font-size: 12px;
+          font-weight: 500;
+          letter-spacing: 0.34em;
+          text-transform: uppercase;
+          color: var(--ash);
+          opacity: 0.8;
+          transition: color 200ms ease, opacity 200ms ease;
+        }
+        .brandmark:hover {
+          opacity: 1;
+          color: var(--paper);
+        }
+
+        .lang-toggle {
+          position: fixed;
+          top: max(14px, env(safe-area-inset-top, 0px));
+          right: 18px;
+          z-index: 5;
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          background: rgba(255, 255, 255, 0.06);
+          border-radius: 100px;
+          padding: 3px;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.04em;
+        }
+        .lang-toggle button {
+          padding: 5px 10px;
+          border-radius: 100px;
+          color: var(--ash);
+          background: none;
+          border: none;
+          cursor: pointer;
+          transition: color 160ms ease, background 160ms ease;
+        }
+        .lang-toggle button[aria-pressed="true"] {
+          background: var(--paper);
+          color: var(--ink-black);
+        }
+
+        .ego-main {
+          position: relative;
+          z-index: 1;
+          min-height: 100vh;
+          max-width: 640px;
+          margin: 0 auto;
+          padding: 64px 20px 48px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .home-screen {
+          width: 100%;
+          position: relative;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          text-align: center;
+          gap: 28px;
+          transition: opacity 480ms ease, transform 480ms ease, filter 480ms ease;
+        }
+        .home-screen.leaving {
+          position: absolute;
+          top: 0;
+          left: 0;
+          opacity: 0;
+          transform: translateY(-14px);
+          filter: blur(2px);
+          pointer-events: none;
+        }
+
+        .home-voice-space {
+          width: 100%;
+          height: min(30vh, 210px);
+        }
+        .voice-space {
+          width: 100%;
+          height: min(49vh, 345px);
+        }
+
+        .tagline {
+          color: var(--ash);
+          font-size: 13px;
+          letter-spacing: 0.01em;
+          margin: 0;
+          max-width: 30ch;
+        }
+
+        .ask {
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 16px;
+          margin-top: 12px;
+        }
+
+        .field {
+          position: relative;
+          width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          border-bottom: 1px solid var(--line);
+          transition: border-color 240ms ease;
+        }
+        .field:focus-within {
+          border-color: var(--frost-dim);
+        }
+        .field input {
+          flex: 1;
+          min-width: 0;
+          background: transparent;
+          border: none;
+          color: var(--paper);
+          font-family: "Work Sans", sans-serif;
+          font-size: 15px;
+          padding: 12px 4px;
+          outline: none;
+        }
+        .field input::placeholder {
+          color: var(--ash);
+        }
+        .field::after {
+          content: "";
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: -1px;
+          height: 1px;
+          background: var(--frost);
+          transform: scaleX(0);
+          transform-origin: left;
+          transition: transform 320ms ease;
+        }
+        .field:focus-within::after {
+          transform: scaleX(1);
+        }
+
+        .mic-btn {
+          position: relative;
+          flex: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 30px;
+          height: 30px;
+          margin-right: -4px;
+          border-radius: 100px;
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: var(--ash);
+        }
+        .mic-btn:hover {
+          color: var(--paper);
+        }
+        .mic-btn[aria-pressed="true"] {
+          color: #e2827a;
+        }
+        .mic-ping {
+          position: absolute;
+          inset: 0;
+          border-radius: 100%;
+          background: rgba(226, 130, 122, 0.22);
+          animation: ego-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+        @keyframes ego-ping {
+          75%,
+          100% {
+            transform: scale(1.9);
+            opacity: 0;
+          }
+        }
+        .mic-error {
+          color: var(--warn);
+          font-size: 12px;
+          text-align: center;
+          margin-top: -8px;
+        }
+
+        button.primary {
+          align-self: center;
+          margin-top: 8px;
+          background: var(--frost);
+          color: var(--ink-black);
+          border: none;
+          border-radius: 100px;
+          padding: 13px 30px;
+          font-family: "Work Sans", sans-serif;
+          font-weight: 600;
+          font-size: 14.5px;
+          letter-spacing: 0.02em;
+          cursor: pointer;
+        }
+
+        .privacy-note {
+          color: var(--ash);
+          font-size: 10.5px;
+          max-width: 34ch;
+          line-height: 1.5;
+          margin-top: 4px;
+          opacity: 0.8;
+          text-align: center;
+        }
+
+        .legal-links {
+          position: fixed;
+          bottom: 8px;
+          left: 0;
+          right: 0;
+          text-align: center;
+          z-index: 4;
+          color: var(--ash);
+          font-size: 9px;
+          letter-spacing: -0.01em;
+          opacity: 0.55;
+        }
+        .legal-links :global(a) {
+          color: inherit;
+          text-decoration: none;
+        }
+        .legal-links :global(a:hover) {
+          color: var(--paper);
+          text-decoration: underline;
+        }
+
+        .verdict-screen {
+          width: 100%;
+          position: absolute;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          text-align: center;
+          gap: 20px;
+          opacity: 0;
+          transform: translateY(16px);
+          pointer-events: none;
+          transition: opacity 520ms ease 80ms, transform 520ms ease 80ms;
+        }
+        .verdict-screen.entering {
+          position: relative;
+          opacity: 1;
+          transform: translateY(0);
+          pointer-events: auto;
+        }
+
+        .section-label {
+          font-size: 10px;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--frost);
+          opacity: 0.9;
+        }
+        .case-tag {
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 10.5px;
+          letter-spacing: 0.04em;
+          color: var(--ash);
+        }
+
+        .quote-bubble {
+          background: rgba(255, 255, 255, 0.045);
+          border: 1px solid var(--line);
+          border-radius: 18px 18px 4px 18px;
+          padding: 14px 18px;
+          font-size: 15px;
+          line-height: 1.55;
+          color: var(--paper);
+          text-align: left;
+          max-width: 90%;
+        }
+
+        .cuerpo {
+          font-size: 16px;
+          line-height: 1.75;
+          color: var(--paper);
+          max-width: 60ch;
+          text-align: left;
+        }
+
+        .pregunta {
+          font-weight: 400;
+          font-size: clamp(15px, 2.1vw, 17px);
+          color: var(--paper);
+          max-width: 56ch;
+          text-align: left;
+        }
+
+        :global(button.listen) {
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+          background: transparent;
+          border: 1px solid var(--line);
+          color: var(--paper);
+          border-radius: 100px;
+          padding: 9px 18px 9px 14px;
+          font-family: "Work Sans", sans-serif;
+          font-size: 13px;
+          cursor: pointer;
+          transition: border-color 200ms ease, color 200ms ease;
+        }
+        :global(button.listen:hover:not(:disabled)) {
+          border-color: var(--frost-dim);
+        }
+        :global(button.listen[data-playing="true"]) {
+          color: var(--frost);
+          border-color: var(--frost-dim);
+        }
+        :global(button.listen:disabled) {
+          cursor: wait;
+          opacity: 0.75;
+        }
+        :global(button.listen .dot) {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: currentColor;
+          flex: none;
+        }
+
+        .reset-link {
+          color: var(--ash);
+          font-size: 12.5px;
+          text-decoration: none;
+          border-bottom: 1px solid transparent;
+          cursor: pointer;
+          background: none;
+          border-top: none;
+          border-left: none;
+          border-right: none;
+          padding: 0;
+          font-family: inherit;
+          transition: color 200ms ease, border-color 200ms ease;
+        }
+        .reset-link:hover {
+          color: var(--paper);
+          border-color: var(--line);
+        }
+
+        .safety-box {
+          display: flex;
+          gap: 12px;
+          text-align: left;
+          border: 1px solid var(--warn-line);
+          background: var(--warn-bg);
+          color: var(--warn);
+          border-radius: 14px;
+          padding: 14px 16px;
+          font-size: 14px;
+          line-height: 1.55;
+          width: 100%;
+        }
+
+        :global(.action-list) {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          text-align: left;
+        }
+        :global(.action-list li) {
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
+          font-size: 15px;
+          line-height: 1.55;
+          color: var(--paper);
+        }
+        :global(.action-list .bullet) {
+          flex: none;
+          width: 22px;
+          height: 22px;
+          margin-top: 2px;
+          border-radius: 50%;
+          border: 1px solid var(--frost-dim);
+          color: var(--frost);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .answer-form {
+          width: 100%;
+          max-width: 60ch;
+          text-align: left;
+        }
+        .answer-form .field-row {
+          display: flex;
+          align-items: flex-end;
+          gap: 12px;
+          border-bottom: 1px solid var(--line);
+          transition: border-color 240ms ease;
+        }
+        .answer-form .field-row:focus-within {
+          border-color: var(--frost-dim);
+        }
+        .answer-form input {
+          flex: 1;
+          min-width: 0;
+          background: transparent;
+          border: none;
+          outline: none;
+          color: var(--paper);
+          font-size: 15px;
+          padding: 10px 2px;
+        }
+        .answer-form input::placeholder {
+          color: var(--ash);
+        }
+        .answer-form button[type="submit"] {
+          color: var(--frost);
+          font-size: 13px;
+          font-weight: 500;
+          background: none;
+          border: none;
+          padding: 10px 0;
+          cursor: pointer;
+        }
+        .answer-form button[type="submit"]:disabled {
+          color: var(--ash);
+          cursor: not-allowed;
+        }
+
+        .pill-toggle {
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          background: rgba(255, 255, 255, 0.06);
+          border-radius: 100px;
+          padding: 3px;
+        }
+        .pill-toggle button {
+          width: 28px;
+          height: 28px;
+          border-radius: 100px;
+          font-size: 11px;
+          font-weight: 600;
+          background: none;
+          border: none;
+          color: var(--ash);
+          cursor: pointer;
+          transition: color 160ms ease, background 160ms ease;
+        }
+        .pill-toggle button[aria-pressed="true"] {
+          background: var(--paper);
+          color: var(--ink-black);
+        }
+
+        .paywall-card {
+          width: 100%;
+          max-width: 60ch;
+          border: 1px solid var(--line);
+          border-radius: 20px;
+          padding: 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          text-align: left;
+          background: rgba(255, 255, 255, 0.02);
+        }
+        .paywall-plans {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        @media (min-width: 640px) {
+          .paywall-plans {
+            flex-direction: row;
+          }
+        }
+        .plan-btn {
+          flex: 1;
+          border: 1px solid var(--line);
+          border-radius: 14px;
+          padding: 14px 16px;
+          text-align: left;
+          background: none;
+          cursor: pointer;
+          transition: border-color 160ms ease;
+          color: var(--paper);
+          font-family: inherit;
+        }
+        .plan-btn:hover:not(:disabled) {
+          border-color: var(--frost-dim);
+        }
+        .plan-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .plan-btn.featured {
+          border: 2px solid var(--frost);
+        }
+        .plan-btn .plan-name {
+          display: block;
+          font-size: 13px;
+          color: var(--ash);
+        }
+        .plan-btn.featured .plan-name {
+          color: var(--frost);
+          font-weight: 500;
+        }
+        .plan-btn .plan-price {
+          display: block;
+          font-size: 17px;
+          font-weight: 600;
+          color: var(--paper);
+          margin-top: 2px;
+        }
+        .plan-btn .plan-note {
+          display: block;
+          font-size: 12px;
+          color: var(--ash);
+          margin-top: 2px;
+        }
+
+        .member-row {
+          border-top: 1px solid var(--line);
+          padding-top: 16px;
+        }
+        .verify-input {
+          flex: 1;
+          min-width: 0;
+          background: transparent;
+          border: 1px solid var(--line);
+          border-radius: 10px;
+          padding: 8px 12px;
+          font-size: 14px;
+          color: var(--paper);
+          outline: none;
+        }
+        .verify-input:focus {
+          border-color: var(--frost-dim);
+        }
+        .verify-input::placeholder {
+          color: var(--ash);
+        }
+        .verify-btn {
+          color: var(--frost);
+          font-size: 13px;
+          font-weight: 500;
+          background: none;
+          border: none;
+          padding: 8px 12px;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .verify-btn:disabled {
+          color: var(--ash);
+          cursor: not-allowed;
+        }
+
+        .notice-pill {
+          font-size: 13px;
+          border-radius: 100px;
+          padding: 8px 16px;
+          display: inline-block;
+        }
+        .notice-pill.success {
+          background: rgba(155, 214, 171, 0.12);
+          color: var(--ok);
+        }
+        .notice-pill.neutral {
+          background: rgba(255, 255, 255, 0.06);
+          color: var(--ash);
+        }
+
+        @keyframes ego-shimmer-dark {
+          0% {
+            background-position: 200% 0;
+          }
+          100% {
+            background-position: -200% 0;
+          }
+        }
+        .shimmer {
+          background-image: linear-gradient(
+            90deg,
+            rgba(111, 160, 216, 0.35) 0%,
+            rgba(111, 160, 216, 0.35) 35%,
+            var(--frost) 50%,
+            rgba(111, 160, 216, 0.35) 65%,
+            rgba(111, 160, 216, 0.35) 100%
+          );
+          background-size: 200% 100%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+          color: transparent;
+          animation: ego-shimmer-dark 1.8s linear infinite;
+        }
+
+        .error-text {
+          color: var(--warn);
+          font-size: 14px;
+        }
+        .retry-link {
+          color: var(--frost);
+          font-size: 13px;
+          font-weight: 500;
+          background: none;
+          border: none;
+          padding: 0;
+          cursor: pointer;
+        }
+        .retry-link:hover {
+          text-decoration: underline;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .home-screen,
+          .verdict-screen,
+          .shimmer {
+            transition-duration: 1ms !important;
+            animation: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
